@@ -44,72 +44,64 @@ bool operator==(const Edge &a, const Edge &b) {
   return a.src == b.src && a.dst == b.dst;
 }
 
-template <typename T> auto compare_ptr(const T *p) {
-  return [=](const std::unique_ptr<T> &q) { return q.get() == p; };
-}
-
 template <typename C, typename T> auto erase(C &col, const T &val) {
   using std::begin;
   using std::end;
   return col.erase(std::remove(begin(col), end(col), val), end(col));
 }
 
-template <typename C, typename P> auto erase_if(C &col, P p) {
+template <typename C, typename I>
+auto swap_remove(C& container, I it) {
+  using std::swap;
+  swap(*it, container.back());
+  container.pop_back();
+  return it;
+}
+
+template <typename C>
+auto swap_remove(C& container, size_t index) {
   using std::begin;
-  using std::end;
-  return col.erase(std::remove_if(begin(col), end(col), p), end(col));
+  return swap_remove(container, begin(container) + index);
 }
 
 struct Circuit {
-  std::vector<std::unique_ptr<Node>> nodes;
-  std::vector<std::vector<Node *>> levels;
+  std::vector<NodeId_t> nodes;
+  std::vector<std::vector<NodeId_t>> levels;
   std::vector<std::vector<Edge>> adjacencies;
+  std::vector<std::vector<Edge>> inputs;
 
-  Circuit(size_t n) : nodes(n), levels(), adjacencies(n) {}
+  Circuit(size_t n) : nodes(n), levels(), adjacencies(n), inputs(n) {}
 
-  void add_node(std::unique_ptr<Node> node) {
-    add_node_to_level(node.get());
-    nodes[node->num] = move(node);
+  // void add_node(std::unique_ptr<Node> node) {
+  void add_node(NodeId_t node, size_t level) {
+    add_node_to_level(node, level);
+    nodes[node] = node;
   }
 
-  void add_node_to_level(Node *node) {
-    while (levels.size() <= node->level) {
+  void add_node_to_level(NodeId_t node, size_t level) {
+    while (levels.size() <= level) {
       levels.push_back({});
     }
-    assert(levels.size() >= node->level + 1);
-    levels[node->level].push_back(node);
+    assert(levels.size() >= level + 1);
+    levels[level].push_back(node);
   }
 
   void add_edge(const Edge &edge) {
     adjacencies[edge.src].push_back(edge);
+    inputs[edge.dst].push_back(edge);
   }
 
-  void remove_node(Node *node) {
-    erase(levels[node->level], node);
-    adjacencies[node->num].clear();
-
-    for (auto &adj : adjacencies) {
-      for (auto it = begin(adj); it != end(adj); ++it) {
-        if (it->dst == node->num) {
-          adj.erase(it);
-          break;
-        }
-      }
-    }
-
-    erase_if(nodes, compare_ptr(node));
-  }
-
-  auto remove_edge(const Edge &edge) {
-    auto &adj = adjacencies[edge.src];
-    return erase(adj, edge);
+  void remove_input_edge(const Edge& edge) {
+    // erase(inputs[edge.dst], edge);
+    auto& ins = inputs[edge.dst];
+    swap_remove(ins, std::find(begin(ins), end(ins), edge));
   }
 
   bool connected() {
-    auto source = nodes.front().get();
-    auto sink = nodes.back().get();
+    auto source = nodes.front();
+    auto sink = nodes.back();
     std::vector<char> visited(nodes.size(), 0);
-    return idfs(source->num, sink->num, visited);
+    return idfs(source, sink, visited);
   }
 
   bool idfs(NodeId_t cur, NodeId_t target, std::vector<char> &visited) {
@@ -127,23 +119,11 @@ struct Circuit {
     }
     return false;
   }
-
-  bool dfs(NodeId_t cur, NodeId_t target, std::vector<char> &visited) {
-    if (cur == target)
-      return true;
-
-    visited[cur] = true;
-    for (auto &next : adjacencies[cur]) {
-      if (!visited[next.dst] && dfs(next.dst, target, visited))
-        return true;
-    }
-    return false;
-  }
 };
 
 const real inf = 1e9;
 
-real calculate_parallel_current(const Circuit &g, real V) {
+std::vector<real> calculate_parallel_current(const Circuit &g, real V) {
   auto R = 0.0;
 
   for (auto &adj : g.adjacencies) {
@@ -153,10 +133,32 @@ real calculate_parallel_current(const Circuit &g, real V) {
     }
   }
 
-  return V * R;
+  auto I = V * R;
+  return std::vector<real>(g.nodes.size(), I);
 }
 
-real calculate_series_current(const Circuit &g, real V) {
+std::vector<real> calculate_polygon_current(const Circuit&g, real V) {
+  std::vector<real> currents(g.nodes.size());
+  std::vector<real> outputs(g.nodes.size());
+
+  currents[0] = inf;
+  outputs[0] = inf;
+
+  for (auto i = 1u; i < g.levels.size(); i++) {
+    for (auto& p : g.levels[i]) {
+      for (auto& in : g.inputs[p]) {
+        currents[p] += outputs[in.src]; // Resistencia impacta como?
+      }
+      auto num_outs = g.adjacencies[p].size();
+      if (num_outs != 0)
+        outputs[p] = currents[p] / num_outs; // Corrente distribuída igualmente entre as saídas
+    }
+  }
+
+  return currents;
+}
+
+std::vector<real> calculate_series_current(const Circuit &g, real V) {
   auto R = 0.0;
 
   for (auto &adj : g.adjacencies) {
@@ -165,33 +167,30 @@ real calculate_series_current(const Circuit &g, real V) {
     }
   }
 
-  return V / R;
+  auto I = V / R;
+  return std::vector<real>(g.nodes.size(), I);
 }
 
 Circuit generate_parallel_circuit(size_t L, real) {
   auto g = Circuit(L + 2);
-  auto init = std::make_unique<Node>(0, 0);
-  auto init_id = 0;
-  g.add_node(move(init));
+  auto init = 0;
+  g.add_node(init, 0);
 
-  auto finish = std::make_unique<Node>(L + 1, 3);
-  auto finish_id = L + 1;
+  auto finish = L + 1;
 
   for (auto i = 1u; i < L; i += 2) {
-    auto a_id = i;
-    auto node_a = std::make_unique<Node>(a_id, 1);
-    g.add_node(move(node_a));
-    g.add_edge(Edge(init_id, a_id, Fuse(0, inf)));
+    auto node_a = i;
+    g.add_node(node_a, 1);
+    g.add_edge(Edge(init, node_a, Fuse(0, inf)));
 
-    auto b_id = i + 1;
-    auto node_b = std::make_unique<Node>(i + 1, 2);
-    g.add_node(move(node_b));
-    g.add_edge(Edge(a_id, b_id, Fuse(20, 20 * i)));
+    auto node_b = i + 1;
+    g.add_node(node_b, 2);
+    g.add_edge(Edge(node_a, node_b, Fuse(20, 20 * i)));
 
-    g.add_edge(Edge(b_id, finish_id, Fuse(0, inf)));
+    g.add_edge(Edge(node_b, finish, Fuse(0, inf)));
   }
 
-  g.add_node(move(finish));
+  g.add_node(finish, 3);
 
   return g;
 }
@@ -199,40 +198,50 @@ Circuit generate_parallel_circuit(size_t L, real) {
 Circuit generate_series_circuit(size_t L, real) {
   auto g = Circuit(L + 2);
 
-  auto init = std::make_unique<Node>(0, 0);
-  auto prev = 0;
-  g.add_node(move(init));
+  auto init = 0;
+  auto prev = init;
+  g.add_node(init, 0);
 
   for (auto i = 1u; i <= L; i++) {
-    auto node_id = i;
-    auto node = std::make_unique<Node>(node_id, i);
-    g.add_node(move(node));
+    auto node = i;
+    g.add_node(node, i);
 
     auto R = i == 1 ? 0.0 : 20.0;
     auto Imax = i == 1 ? inf : 20.0;
-    g.add_edge(Edge(prev, node_id, Fuse(R, Imax)));
+    g.add_edge( Edge(prev, node, Fuse(R, Imax)));
 
-    prev = node_id;
+    prev = node;
   }
 
-  auto finish = std::make_unique<Node>(L + 1, L + 1);
-  g.add_node(move(finish));
-  g.add_edge(Edge(prev, L + 1, Fuse(0, inf)));
+  auto finish = L + 1;
+  g.add_node(finish, L + 1);
+  g.add_edge(Edge(prev, finish, Fuse(0, inf)));
 
   return g;
 }
 
-enum TipoCircuito { Series, Parallel };
+Circuit generate_square_circuit(size_t L, real D) {
+  return Circuit(L);
+}
+
+Circuit generate_hexagon_circuit(size_t L, real D) {
+  return Circuit(L);
+}
+
+enum TipoCircuito { Series, Parallel, Square, Hexagon };
 TipoCircuito CurrentType = Parallel;
 
-real calculate_current(const Circuit &g, real V) {
+std::vector<real> calculate_current(const Circuit &g, real V) {
   switch (CurrentType) {
   case Parallel:
     return calculate_parallel_current(g, V);
   case Series:
     return calculate_series_current(g, V);
+  case Square:
+  case Hexagon:
+    return calculate_polygon_current(g, V);
   default:
-    return 0.0;
+    return {};
   }
 }
 
@@ -242,6 +251,10 @@ Circuit generate_circuit(size_t L, real D) {
     return generate_parallel_circuit(L, D);
   case Series:
     return generate_series_circuit(L, D);
+  case Square:
+    return generate_square_circuit(L, D);
+  case Hexagon:
+    return generate_hexagon_circuit(L, D);
   default:
     return Circuit(L);
   }
@@ -260,34 +273,25 @@ struct Log {
   }
 };
 
-real iteracao(Circuit &g, real V, real deltaV, Log &r) {
-  auto I = calculate_current(g, V);
-
+void iteracao(Circuit &g, const std::vector<real>& currents) {
   for (auto &points : g.levels) {
-    auto blown = false;
-
     for (auto &p : points) {
-      auto &adj = g.adjacencies[p->num];
+      auto I = currents[p];
+      auto &adj = g.adjacencies[p];
       auto it = begin(adj);
 
       while (it != end(adj)) {
         if (it->fuse.blown(I)) {
-          // it = adj.erase(it); // Remove a aresta diretamente.
-          std::swap(*it, adj.back());
-          adj.pop_back();
-          blown = true;
+          g.remove_input_edge(*it);
+          swap_remove(adj, it);
+          // std::swap(*it, adj.back());
+          // adj.pop_back();
         } else {
           ++it;
         }
       }
-
-      if (blown)
-        return V;
     }
   }
-
-  r.log(V, I);
-  return V + deltaV;
 }
 
 std::string flt2str(real f) {
@@ -304,14 +308,14 @@ void draw_graph(const Circuit &g) {
   out << "  edge [arrowhead=empty arrowsize=0.5 fontsize=8]\n";
 
   for (auto &v : g.nodes) {
-    for (auto &e : g.adjacencies[v->num]) {
+    for (auto &e : g.adjacencies[v]) {
       auto &f = e.fuse;
       std::string label;
       if (f.R == 0)
         label = "";
       else
         label = flt2str(f.R) + "Ω " + flt2str(f.Imax) + "A";
-      out << "    " << v->num << " -> " << e.dst << "[label=\"" << label
+      out << "    " << v << " -> " << e.dst << "[label=\"" << label
           << "\"]\n";
     }
   }
@@ -324,9 +328,14 @@ Log simulacao(size_t L, real D, real V0, real deltaV) {
   // draw_graph(g);
   auto V = V0;
   auto l = Log();
+  auto sink = g.nodes.size() - 1;
 
   while (g.connected()) {
-    V = iteracao(g, V, deltaV, l);
+    auto currents = calculate_current(g, V);
+    l.log(V, currents[sink]);
+
+    iteracao(g, currents);
+    V += deltaV;
   }
 
   l.log(V, 0);
@@ -344,6 +353,6 @@ int main() {
   auto start = now();
   auto s = simulacao(400, 0, 0, 0.1);
   std::cout << elapsed(start) << " ms\n";
-  // ofstream out{"saida.csv"};
-  // s.show(out);
+  std::ofstream out{"saida.csv"};
+  s.show(out);
 }
