@@ -3,7 +3,6 @@
 #include <chrono>
 #include <fstream>
 #include <iostream>
-#include <memory>
 #include <sstream>
 #include <stack>
 #include <string>
@@ -44,12 +43,6 @@ bool operator==(const Edge &a, const Edge &b) {
   return a.src == b.src && a.dst == b.dst;
 }
 
-template <typename C, typename T> auto erase(C &col, const T &val) {
-  using std::begin;
-  using std::end;
-  return col.erase(std::remove(begin(col), end(col), val), end(col));
-}
-
 template <typename C, typename I>
 auto swap_remove(C& container, I it) {
   using std::swap;
@@ -72,7 +65,6 @@ struct Circuit {
 
   Circuit(size_t n) : nodes(n), levels(), adjacencies(n), inputs(n) {}
 
-  // void add_node(std::unique_ptr<Node> node) {
   void add_node(NodeId_t node, size_t level) {
     add_node_to_level(node, level);
     nodes[node] = node;
@@ -92,7 +84,6 @@ struct Circuit {
   }
 
   void remove_input_edge(const Edge& edge) {
-    // erase(inputs[edge.dst], edge);
     auto& ins = inputs[edge.dst];
     swap_remove(ins, std::find(begin(ins), end(ins), edge));
   }
@@ -273,6 +264,20 @@ struct Log {
   }
 };
 
+/*
+ * TODO
+ *
+ * A cada iteração, por nível:
+ *   - Calcular corrente de entrada
+ *     Somar correntes (resistencia?) vindo das arestas de entrada
+ *   - Calcular correntes de saída
+ *     Distribuir a corrente de entrada nas arestas de saída
+ *   - Verificar queima
+ *     Se alguma das arestas de saída exceder a Imax, retirar do grafo
+ *
+ * Mudar representação? Manter a Edge num lugar só e usar ponteiros nas
+ * listas de arestas de entrada e saída? Manter a corrente atual na Edge?
+ */
 void iteracao(Circuit &g, const std::vector<real>& currents) {
   for (auto &points : g.levels) {
     for (auto &p : points) {
@@ -284,8 +289,6 @@ void iteracao(Circuit &g, const std::vector<real>& currents) {
         if (it->fuse.blown(I)) {
           g.remove_input_edge(*it);
           swap_remove(adj, it);
-          // std::swap(*it, adj.back());
-          // adj.pop_back();
         } else {
           ++it;
         }

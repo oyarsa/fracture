@@ -1,3 +1,4 @@
+@echo off
 del graph.dot
 del saida.csv
 del saida.pdf
