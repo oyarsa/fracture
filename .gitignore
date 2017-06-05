@@ -1,5 +1,8 @@
 *.exe
 *.o
+*.obj
+*.ilk
+*.pdb
 *.dot
 *.pdf
 *.csv

@@ -1,3 +1,21 @@
+/*
+  fracture: Simulation of a scalar fracture model based on Freitas (2007).
+  Copyright (C) 2017 Italo Silva
+
+  This program is free software: you can redistribute it and/or modify
+  it under the terms of the GNU General Public License as published by
+  the Free Software Foundation, either version 3 of the License, or
+  (at your option) any later version.
+
+  This program is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU General Public License for more details.
+
+  You should have received a copy of the GNU General Public License
+  along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*/
+
 #include <algorithm>
 #include <cassert>
 #include <chrono>
@@ -6,10 +24,7 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
-#include <numeric>
 #include <sstream>
-#include <stack>
-#include <string>
 #include <utility>
 #include <vector>
 
@@ -86,7 +101,6 @@ struct Circuit {
     for (auto &in : ins) {
       auto &adj = adjacencies[in->src];
       swap_remove(adj, std::find(begin(adj), end(adj), in));
-      // adj.erase(std::remove(begin(adj), end(adj), in), end(adj));
       if (adj.empty()) {
         remove_node_inputs(in->src);
       }
@@ -200,7 +214,7 @@ struct Log {
 
   void log(real V, real I) { xy.push_back({V, I}); }
 
-  size_t iteracoes() const { return xy.size(); }
+  size_t iterations() const { return xy.size(); }
 
   void show(std::ostream &out = std::cout) {
     out << "V,I\n";
@@ -210,18 +224,6 @@ struct Log {
   }
 };
 
-/*
- * A cada iteração, por nível:
- *   - Calcular corrente de entrada
- *     Somar correntes (resistencia?) vindo das arestas de entrada
- *   - Calcular correntes de saída
- *     Distribuir a corrente de entrada nas arestas de saída
- *   - Verificar queima
- *     Se alguma das arestas de saída exceder a Imax, retirar do grafo
- *
- * Mudar representação? Manter a Edge num lugar só e usar ponteiros nas
- * listas de arestas de entrada e saída? Manter a corrente atual na Edge?
- */
 std::vector<real>
 calculate_ratios(const std::vector<std::shared_ptr<Edge>> &outputs) {
   std::vector<real> ratios(outputs.size());
@@ -242,13 +244,28 @@ calculate_ratios(const std::vector<std::shared_ptr<Edge>> &outputs) {
   return ratios;
 }
 
-void iteracao(Circuit &g, real V, std::vector<real> &currents) {
+void iteration(Circuit &g, real V, std::vector<real> &currents) {
+  // Total current in circuit. Maybe improve this?
   const auto total_current = 20 * V;
 
+  // Distribute the current evenly to the first level.
   for (auto &out : g.adjacencies[0]) {
     out->current = total_current / g.adjacencies[0].size();
   }
 
+  /*
+   * For each iteration, per level after the first:
+   *   - Calculate input current on point
+   *     Sum currents coming from input edges.
+   *   - Calculate output currents
+   *     Distribute current on point to the output edges, inversely proportional
+   *     to the edge's resistance.
+   *   - Check if the edge will blow with the current (if it exceeds its Imax)
+   *     If it does, remove the edge from the graph.
+   *   - Check if the point (except the destination) still has any output edge.
+   *     If it doesn't, current must not flow to it, and the input edges must
+   *     be removed.
+   */
   for (auto lit = begin(g.levels) + 1; lit != end(g.levels); ++lit) {
     for (auto &p : *lit) {
       Amperes current(0.0);
@@ -309,10 +326,10 @@ void draw_graph(const Circuit &g, const std::string &id = "begin") {
 
   out << "}\n";
 
-  std::cout << "Grafo impresso: " << id << "\n";
+  std::cout << "Graph printed: " << id << "\n";
 }
 
-Log simulacao(size_t L, real D, real V0, real deltaV) {
+Log simulation(size_t L, real D, real V0, real deltaV) {
   auto g = generate_circuit(L, D);
   draw_graph(g, "begin");
   auto V = V0;
@@ -322,7 +339,7 @@ Log simulacao(size_t L, real D, real V0, real deltaV) {
   std::vector<real> currents(g.nodes.size());
 
   while (g.connected()) {
-    iteracao(g, V, currents);
+    iteration(g, V, currents);
     l.log(V, currents[sink]);
     V += deltaV;
   }
@@ -349,9 +366,9 @@ int main(int argc, char **argv) {
 
   seed_rand();
   auto start = now();
-  auto s = simulacao(L, D, 0, 0.1);
-  std::cout << s.iteracoes() << " iteracoes\n";
+  auto s = simulation(L, D, 0, 0.1);
+  std::cout << s.iterations() << " iterations\n";
   std::cout << elapsed(start) << " ms\n";
-  std::ofstream out{"saida.csv"};
+  std::ofstream out{"output.csv"};
   s.show(out);
 }
