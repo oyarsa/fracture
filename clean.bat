@@ -1,5 +1,8 @@
 @echo off
-del graph.dot
-del saida.csv
-del saida.pdf
-del opt.exe
+del *.obj
+del *.exe
+del graph*.dot*
+del *.csv
+del *.pdf
+del *.ilk
+del *.pdb

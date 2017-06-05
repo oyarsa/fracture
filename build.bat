@@ -1,0 +1,1 @@
+cl /Ox /arch:AVX2 /DEBUG /Z7 /Feopt /openmp /EHsc prototipo.cpp
