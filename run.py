@@ -33,7 +33,7 @@ pdf = 'output.pdf'
 pdf2 = 'result.pdf'
 graph = 'graph-begin.dot'
 graphend = 'graph-end.dot'
-exe = 'opt.exe'
+exe = 'fracture.exe'
 
 run(f'{exe} {L} {D}')
 
