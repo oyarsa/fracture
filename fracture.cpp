@@ -241,26 +241,65 @@ generate_hexagon_circuit(size_t L, real D)
 Circuit
 generate_square_circuit(size_t L, real D)
 {
-  return Circuit(L);
+  auto total_nodes = L*L + 2;
+  auto g = Circuit(total_nodes);
+  auto source = NodeId_t{ 0 };
+  auto level = 0;
+  g.add_node(source, level);
+  level++;
+
+  NodeId_t next = 1;
+  std::vector<NodeId_t> prev(L);
+  std::vector<NodeId_t> curr(L);
+
+  for (auto i = 0u; i < L; i++) {
+    prev[i] = next++;
+    g.add_node(prev[i], level);
+    g.add_edge(Edge(source, prev[i], Fuse(0, inf)));
+  }
+  level++;
+
+  for (auto i = 1u; i < L; i++) {
+    for (auto j = 0u; j < L; j++) {
+      curr[j] = next++;
+      g.add_node(curr[j], level);
+
+      g.add_edge(Edge(prev[j], curr[j], random_fuse(D, 20)));
+      if (j > 0)
+        g.add_edge(Edge(curr[j - 1], curr[j], random_fuse(D, 20)));
+    }
+    for (auto j = 0u; j < L; j++) {
+      prev[j] = curr[j];
+    }
+    level++;
+  }
+
+  auto sink = next;
+  g.add_node(sink, level);
+  for (auto& v : prev) {
+    g.add_edge(Edge(v, sink, Fuse(0, inf)));
+  }
+
+  return g;
 }
 
-enum class TipoCircuito
+enum class CircuitType
 {
   Square,
   Tilted,
   Hexagon
 };
-auto CurrentType = TipoCircuito::Square;
+auto CurrentType = CircuitType::Square;
 
 Circuit
 generate_circuit(size_t L, real D)
 {
   switch (CurrentType) {
-    case TipoCircuito::Square:
+    case CircuitType::Square:
       return generate_square_circuit(L, D);
-    case TipoCircuito::Tilted:
+    case CircuitType::Tilted:
       return generate_titled_circuit(L, D);
-    case TipoCircuito::Hexagon:
+    case CircuitType::Hexagon:
       return generate_hexagon_circuit(L, D);
     default:
       return Circuit(L);
