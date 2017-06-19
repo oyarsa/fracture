@@ -21,12 +21,17 @@ import numpy as np
 import sys
 from subprocess import run
 
-if len(sys.argv) != 3:
+if len(sys.argv) < 3:
     L = 14
     D = 1.0
 else:
     L = sys.argv[1]
     D = sys.argv[2]
+
+if len(sys.argv) < 4:
+    tipo = "t"
+else:
+    tipo = sys.argv[3]
 
 results = 'output.csv'
 pdf = 'output.pdf'
@@ -35,7 +40,7 @@ graph = 'graph-begin.dot'
 graphend = 'graph-end.dot'
 exe = 'fracture.exe'
 
-run(f'{exe} {L} {D}')
+run(f'{exe} {L} {D} {tipo}')
 
 run(f'dot {graph} -Tpdf -o{pdf}')
 run(f'start {pdf}', shell=True)
@@ -43,5 +48,5 @@ run(f'dot {graphend} -Tpdf -o{pdf2}')
 run(f'start {pdf2}', shell=True)
 
 data = np.genfromtxt(results, delimiter=',', skip_header=1, names=['V', 'I'])
-plt.plot(data['V'], data['I'], '-')
+plt.plot(data['V'], data['I'], linestyle='-', marker='.', linewidth=1)
 plt.show()

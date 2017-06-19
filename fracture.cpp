@@ -292,7 +292,7 @@ enum class CircuitType
   Tilted,
   Hexagon
 };
-auto CurrentType = CircuitType::Square;
+auto CurrentType = CircuitType::Tilted;
 
 Circuit
 generate_circuit(size_t L, real D)
@@ -511,9 +511,20 @@ main(int argc, char** argv)
   size_t L = 14;
   real D = 1;
 
-  if (argc == 3) {
+  if (argc >= 3) {
     L = std::stoul(argv[1]);
     D = std::stod(argv[2]);
+  }
+  if (argc >= 4) {
+    auto type = std::string{ argv[3] };
+    if (type == "s")
+      CurrentType = CircuitType::Square;
+    else if (type == "t")
+      CurrentType = CircuitType::Tilted;
+    else if (type == "h")
+      CurrentType = CircuitType::Hexagon;
+    else
+      std::cout << "WARNING: Invalid circuit type\n";
   }
 
   seed_rand();
