@@ -237,7 +237,7 @@ generate_hexagon_circuit(size_t L, real D)
 Circuit
 generate_square_circuit(size_t L, real D)
 {
-  auto total_nodes = L*L + 2;
+  auto total_nodes = L * L + 2;
   auto g = Circuit(total_nodes);
   auto source = NodeId_t{ 0 };
   auto level = 0;
@@ -262,11 +262,11 @@ generate_square_circuit(size_t L, real D)
       curr[j] = next++;
       g.add_node(curr[j], level);
 
-      auto fuseH = random_fuse(D, 20*horiz);
+      auto fuseH = random_fuse(D, 20 * horiz);
       fuseH.Imax = 20;
       g.add_edge(Edge(prev[j], curr[j], fuseH));
       if (j > 0) {
-        auto fuseV = random_fuse(D, 20*vert);
+        auto fuseV = random_fuse(D, 20 * vert);
         fuseV.Imax = 20;
         g.add_edge(Edge(curr[j - 1], curr[j], fuseV));
       }
@@ -414,13 +414,14 @@ flt2str(real f)
 
 using EdgeMap = std::vector<std::pair<const Edge&, bool>>;
 
-EdgeMap diff_graph(const Circuit& before, const Circuit& after)
+EdgeMap
+diff_graph(const Circuit& before, const Circuit& after)
 {
   auto m = EdgeMap{};
 
   for (auto v : before.nodes) {
     for (auto& e : before.adjacencies[v]) {
-      m.push_back({*e, after.contains(e)});
+      m.push_back({ *e, after.contains(e) });
     }
   }
 
@@ -452,15 +453,13 @@ draw_graph(const EdgeMap& em, const std::string& id = "begin")
       style = "solid";
       head = "none";
     } else {
-      label = flt2str(f.R) + "Ω " + flt2str(f.Imax) + "A " +
-        flt2str(e.current) + "A";
+      label =
+        flt2str(f.R) + "Ω " + flt2str(f.Imax) + "A " + flt2str(e.current) + "A";
       style = "solid";
       head = "empty";
     }
-    out << "    " << e.src << " -> " << e.dst
-        << "[label=\"" << label
-        << e.src << "->" << e.dst
-        << "\" "
+    out << "    " << e.src << " -> " << e.dst << "[label=\"" << label << e.src
+        << "->" << e.dst << "\" "
         << "style=\"" << style << "\" "
         << "arrowhead=\"" << head << "\" "
         << "]\n";
