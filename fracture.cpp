@@ -67,16 +67,6 @@ struct Edge
   }
 };
 
-template <typename C, typename I>
-auto
-swap_remove(C& container, I it)
-{
-  using std::swap;
-  swap(*it, container.back());
-  container.pop_back();
-  return it;
-}
-
 struct Circuit
 {
   std::vector<NodeId_t> nodes;
@@ -116,7 +106,7 @@ struct Circuit
   void remove_input_edge(const std::shared_ptr<Edge>& edge)
   {
     auto& ins = inputs[edge->dst];
-    swap_remove(ins, std::find(begin(ins), end(ins), edge));
+    ins.erase(std::remove(begin(ins), end(ins), edge), end(ins));
   }
 
   void remove_node_inputs(NodeId_t node)
@@ -124,7 +114,7 @@ struct Circuit
     auto& ins = inputs[node];
     for (auto& in : ins) {
       auto& adj = adjacencies[in->src];
-      swap_remove(adj, std::find(begin(adj), end(adj), in));
+      adj.erase(std::remove(begin(adj), end(adj), in), end(adj));
       if (adj.empty()) {
         remove_node_inputs(in->src);
       }
@@ -136,6 +126,12 @@ struct Circuit
   {
     auto source = nodes.front();
     return adjacencies[source].size() > 0;
+  }
+
+  bool contains(const std::shared_ptr<Edge>& e) const
+  {
+    auto& adj = adjacencies[e->src];
+    return std::find(begin(adj), end(adj), e) != end(adj);
   }
 };
 
@@ -259,14 +255,21 @@ generate_square_circuit(size_t L, real D)
   }
   level++;
 
+  auto vert = 0.99;
+  auto horiz = 0.01;
   for (auto i = 1u; i < L; i++) {
     for (auto j = 0u; j < L; j++) {
       curr[j] = next++;
       g.add_node(curr[j], level);
 
-      g.add_edge(Edge(prev[j], curr[j], random_fuse(D, 20)));
-      if (j > 0)
-        g.add_edge(Edge(curr[j - 1], curr[j], random_fuse(D, 20)));
+      auto fuseH = random_fuse(D, 20*horiz);
+      fuseH.Imax = 20;
+      g.add_edge(Edge(prev[j], curr[j], fuseH));
+      if (j > 0) {
+        auto fuseV = random_fuse(D, 20*vert);
+        fuseV.Imax = 20;
+        g.add_edge(Edge(curr[j - 1], curr[j], fuseV));
+      }
     }
     for (auto j = 0u; j < L; j++) {
       prev[j] = curr[j];
@@ -385,7 +388,9 @@ iteration(Circuit& g, real V, std::vector<real>& currents)
         Amperes I = current * ratios[i++];
         if ((*it)->fuse.blown(I)) {
           g.remove_input_edge(*it);
-          swap_remove(adj, it);
+          // std::cout << current << ", " << adj.size()  << ": " << I << " - " << V << " - "
+          //           << (*it)->src << "->" << (*it)->dst << ": " << (*it)->fuse.R << "\n";
+          it = adj.erase(it);
         } else {
           (*it)->current = I;
           ++it;
@@ -407,27 +412,58 @@ flt2str(real f)
   return oss.str();
 }
 
+using EdgeMap = std::vector<std::pair<const Edge&, bool>>;
+
+EdgeMap diff_graph(const Circuit& before, const Circuit& after)
+{
+  auto m = EdgeMap{};
+
+  for (auto v : before.nodes) {
+    for (auto& e : before.adjacencies[v]) {
+      m.push_back({*e, after.contains(e)});
+    }
+  }
+
+  return m;
+}
+
 void
-draw_graph(const Circuit& g, const std::string& id = "begin")
+draw_graph(const EdgeMap& em, const std::string& id = "begin")
 {
   std::ofstream out{ "graph-" + id + ".dot" };
   out << "digraph {\n";
   out << "  graph [rankdir=LR]\n";
   out << "  node [height=0.05 label=\"\" shape=point width=0.05]\n";
-  out << "  edge [arrowhead=empty arrowsize=0.5 fontsize=8]\n";
+  out << "  edge [arrowsize=0.5 fontsize=8]\n";
 
-  for (auto& v : g.nodes) {
-    for (auto& e : g.adjacencies[v]) {
-      auto& f = e->fuse;
-      std::string label;
-      if (f.R == 0)
-        label = "";
-      else
-        label = flt2str(f.R) + "Ω " + flt2str(f.Imax) + "A " +
-                flt2str(e->current) + "A";
-      out << "    " << v << " -> " << e->dst << "[label=\"" << label << e->src
-          << "->" << e->dst << "\"]\n";
+  for (auto& p : em) {
+    auto& e = p.first;
+    auto exists = p.second;
+    auto& f = e.fuse;
+    std::string label;
+    std::string style;
+    std::string head;
+    if (!exists) {
+      label = "";
+      style = "dotted";
+      head = "none";
+    } else if (f.R == 0) {
+      label = "";
+      style = "solid";
+      head = "none";
+    } else {
+      label = flt2str(f.R) + "Ω " + flt2str(f.Imax) + "A " +
+        flt2str(e.current) + "A";
+      style = "solid";
+      head = "empty";
     }
+    out << "    " << e.src << " -> " << e.dst
+        << "[label=\"" << label
+        << e.src << "->" << e.dst
+        << "\" "
+        << "style=\"" << style << "\" "
+        << "arrowhead=\"" << head << "\" "
+        << "]\n";
   }
 
   out << "}\n";
@@ -439,7 +475,8 @@ Log
 simulation(size_t L, real D, real V0, real deltaV)
 {
   auto g = generate_circuit(L, D);
-  draw_graph(g, "begin");
+  auto original = g;
+  draw_graph(diff_graph(original, g), "begin");
   auto V = V0;
   auto l = Log();
   auto sink = g.nodes.size() - 1;
@@ -451,7 +488,7 @@ simulation(size_t L, real D, real V0, real deltaV)
     l.log(V, currents[sink]);
     V += deltaV;
   }
-  draw_graph(g, "end");
+  draw_graph(diff_graph(original, g), "end");
 
   return l;
 }
