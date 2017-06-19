@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <ctime>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <memory>
 #include <sstream>
@@ -132,6 +133,28 @@ struct Circuit
   {
     auto& adj = adjacencies[e->src];
     return std::find(begin(adj), end(adj), e) != end(adj);
+  }
+
+  const Edge* edge_between(NodeId_t u, NodeId_t v) const
+  {
+    auto e = find_edge(u, v);
+    if (e)
+      return e;
+    e = find_edge(v, u);
+    if (e)
+      return e;
+    return nullptr;
+  }
+
+  const Edge* find_edge(NodeId_t src, NodeId_t dst) const
+  {
+    auto& adj = adjacencies[src];
+    auto it = std::find_if(
+      begin(adj), end(adj), [&dst](auto& e) { return e->dst == dst; });
+    if (it != end(adj))
+      return it->get();
+    else
+      return nullptr;
   }
 };
 
@@ -458,8 +481,9 @@ draw_graph(const EdgeMap& em, const std::string& id = "begin")
       style = "solid";
       head = "empty";
     }
-    out << "    " << e.src << " -> " << e.dst << "[label=\"" << label << e.src
-        << "->" << e.dst << "\" "
+    out << "    " << e.src << " -> " << e.dst << "[label=\"" << label
+        // << e.src << "->" << e.dst
+        << "\" "
         << "style=\"" << style << "\" "
         << "arrowhead=\"" << head << "\" "
         << "]\n";
@@ -468,6 +492,90 @@ draw_graph(const EdgeMap& em, const std::string& id = "begin")
   out << "}\n";
 
   std::cout << "Graph printed: " << id << "\n";
+}
+
+using Vector = std::vector<real>;
+using Matrix = std::vector<Vector>;
+
+std::pair<Matrix, Vector>
+nodal_analysis(const Circuit& g, real V)
+{
+  auto m = g.nodes.size() - 2 -
+           (g.levels.at(1).size() + g.levels.at(g.levels.size() - 2).size());
+  auto A = Matrix(m, Vector(m));
+
+  for (auto i = 0u; i < m; i++) {
+    auto v = i + 1 + g.levels.at(1).size();
+    auto total = real{ 0 };
+
+    for (auto& x : g.adjacencies.at(v)) {
+      total += 1. / x->fuse.R;
+    }
+    for (auto& x : g.inputs.at(v)) {
+      total += 1. / x->fuse.R;
+    }
+
+    A[i][i] = total;
+  }
+
+  for (auto i = 0u; i < m; i++) {
+    for (auto j = 0u; j < m; j++) {
+      if (i == j)
+        continue;
+
+      auto u = i + 1 + g.levels.at(1).size();
+      auto v = j + 1 + g.levels.at(1).size();
+      auto edge = g.edge_between(u, v);
+      auto value = edge ? -1. / edge->fuse.R : 0;
+      A[i][j] = value;
+    }
+  }
+
+  auto I = Vector(m, 0.0);
+
+  for (auto u : g.levels.at(1)) {
+    for (auto& e : g.adjacencies.at(u)) {
+      auto v = e->dst;
+      auto R = e->fuse.R;
+      auto i = v - 1 - g.levels.at(1).size();
+
+      I.at(i) = V / R;
+    }
+  }
+  for (auto u : g.levels.at(g.levels.size() - 3)) {
+    for (auto& e : g.adjacencies.at(u)) {
+      auto R = e->fuse.R;
+      auto i = u - 1 - g.levels.at(1).size();
+
+      I.at(i) += -V / R;
+    }
+  }
+
+  return { A, I };
+}
+
+void
+print_la(const std::pair<Matrix, Vector>& Ab)
+{
+  const auto& A = Ab.first;
+  const auto& b = Ab.second;
+  const auto m = A.size();
+  const auto width = 7;
+
+  for (auto i = 0u; i < m; i++) {
+    for (auto j = 0u; j < m + 2; j++) {
+      std::cout << std::setw(width);
+      if (j < m) {
+        std::cout << A[i][j];
+      } else if (j == m) {
+        std::cout << "X" << (i + 1);
+      } else if (j > m) {
+        std::cout << b[i];
+      }
+    }
+    std::cout << "\n";
+  }
+  std::cout << "\n";
 }
 
 Log
@@ -483,6 +591,8 @@ simulation(size_t L, real D, real V0, real deltaV)
   std::vector<real> currents(g.nodes.size());
 
   while (g.connected()) {
+    // std::cout << V << "\n";
+    // print_la(nodal_analysis(g, V));
     iteration(g, V, currents);
     l.log(V, currents[sink]);
     V += deltaV;
