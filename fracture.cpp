@@ -71,12 +71,14 @@ struct Edge
 struct Circuit
 {
   std::vector<NodeId_t> nodes;
+  std::vector<std::size_t> node_level;
   std::vector<std::vector<NodeId_t>> levels;
   std::vector<std::vector<std::shared_ptr<Edge>>> adjacencies;
   std::vector<std::vector<std::shared_ptr<Edge>>> inputs;
 
   Circuit(size_t n)
     : nodes(n)
+    , node_level(n)
     , levels()
     , adjacencies(n)
     , inputs(n)
@@ -86,6 +88,7 @@ struct Circuit
   void add_node(NodeId_t node, size_t level)
   {
     add_node_to_level(node, level);
+    node_level[node] = level;
     nodes[node] = node;
   }
 
@@ -123,11 +126,11 @@ struct Circuit
     ins.clear();
   }
 
-  bool connected()
-  {
-    auto source = nodes.front();
-    return adjacencies[source].size() > 0;
-  }
+  NodeId_t source() const { return nodes.front(); }
+
+  NodeId_t sink() const { return nodes.back(); }
+
+  bool connected() { return adjacencies[source()].size() > 0; }
 
   bool contains(const std::shared_ptr<Edge>& e) const
   {
@@ -374,7 +377,7 @@ calculate_ratios(const std::vector<std::shared_ptr<Edge>>& outputs)
 }
 
 void
-iteration(Circuit& g, real V, std::vector<real>& currents)
+calculate_current(Circuit& g, real V, std::vector<real>& currents)
 {
   // Total current in circuit. Maybe improve this?
   const auto total_current = base_Imax * V;
@@ -384,19 +387,6 @@ iteration(Circuit& g, real V, std::vector<real>& currents)
     out->current = total_current / g.adjacencies[0].size();
   }
 
-  /*
-   * For each iteration, per level after the first:
-   *   - Calculate input current on point
-   *     Sum currents coming from input edges.
-   *   - Calculate output currents
-   *     Distribute current on point to the output edges, inversely proportional
-   *     to the edge's resistance.
-   *   - Check if the edge will blow with the current (if it exceeds its Imax)
-   *     If it does, remove the edge from the graph.
-   *   - Check if the point (except the destination) still has any output edge.
-   *     If it doesn't, current must not flow to it, and the input edges must
-   *     be removed.
-   */
   for (auto lit = begin(g.levels) + 1; lit != end(g.levels); ++lit) {
     for (auto& p : *lit) {
       Amperes current(0.0);
@@ -407,26 +397,34 @@ iteration(Circuit& g, real V, std::vector<real>& currents)
       currents[p] = current;
       auto& adj = g.adjacencies[p];
       auto ratios = calculate_ratios(adj);
-      auto it = begin(adj);
-      auto i = 0;
-
-      while (it != end(adj)) {
-        Amperes I = current * ratios[i++];
-        if ((*it)->fuse.blown(I)) {
-          g.remove_input_edge(*it);
-          // std::cout << current << ", " << adj.size()  << ": " << I << " - " << V << " - "
-          //           << (*it)->src << "->" << (*it)->dst << ": " << (*it)->fuse.R << "\n";
-          it = adj.erase(it);
-        } else {
-          (*it)->current = I;
-          ++it;
-        }
-      }
-
-      if (adj.empty() && lit != end(g.levels) - 1) {
-        g.remove_node_inputs(p);
+      for (auto i = 0u; i < adj.size(); i++) {
+        adj[i]->current = current * ratios[i];
       }
     }
+  }
+}
+
+void
+iteration(Circuit& g, real V, std::vector<real>& currents)
+{
+  calculate_current(g, V, currents);
+
+  for (auto p : g.nodes) {
+    auto& adj = g.adjacencies[p];
+    auto it = begin(adj);
+
+    while (it != end(adj)) {
+      auto& e = *it;
+      // std::cout << e->src << ": " << e->dst << "  -  " << e->current << "\n";
+      if (e->fuse.blown(e->current)) {
+        g.remove_input_edge(e);
+        it = adj.erase(it);
+      } else {
+        ++it;
+      }
+    }
+    if (p != g.sink() && adj.empty())
+      g.remove_node_inputs(p);
   }
 }
 
@@ -494,19 +492,21 @@ draw_graph(const EdgeMap& em, const std::string& id = "begin")
 
   out << "}\n";
 
-  std::cout << "Graph printed: " << id << "\n";
+  // std::cout << "Graph printed: " << id << "\n";
 }
 
 using Vector = std::vector<real>;
 using Matrix = std::vector<Vector>;
 
 std::pair<Matrix, Vector>
-nodal_analysis(const Circuit& g, real V)
+kcl(const Circuit& g, real V)
 {
+  // http://mathonweb.com/help/backgd5a.htm
   auto m = g.nodes.size() - 2 -
            (g.levels.at(1).size() + g.levels.at(g.levels.size() - 2).size());
   auto A = Matrix(m, Vector(m));
 
+  // G_jj
   for (auto i = 0u; i < m; i++) {
     auto v = i + 1 + g.levels.at(1).size();
     auto total = real{ 0 };
@@ -521,6 +521,7 @@ nodal_analysis(const Circuit& g, real V)
     A[i][i] = total;
   }
 
+  //G_jk
   for (auto i = 0u; i < m; i++) {
     for (auto j = 0u; j < m; j++) {
       if (i == j)
@@ -536,19 +537,36 @@ nodal_analysis(const Circuit& g, real V)
 
   auto I = Vector(m, 0.0);
 
-  for (auto u : g.levels.at(1)) {
+  // First level is actually the third absolute one because
+  // the first is a source in a network-flow sense, which
+  // is unnecessary in KCL. The second absolute becomes the zeroth
+  // because it is the contact with Vcc, and will be used
+  // to calculate the offsets.
+  const auto zeroth_level = 1;
+  // I_j
+  for (auto u : g.levels.at(zeroth_level)) {
     for (auto& e : g.adjacencies.at(u)) {
-      auto v = e->dst;
       auto R = e->fuse.R;
-      auto i = v - 1 - g.levels.at(1).size();
+      auto v = e->dst;
+      auto i = v - 1 - g.levels.at(zeroth_level).size();
 
-      I.at(i) = V / R;
+      I.at(i) += V / R;
     }
   }
-  for (auto u : g.levels.at(g.levels.size() - 3)) {
-    for (auto& e : g.adjacencies.at(u)) {
+
+  // Last level is the contact with ground, so levels - 2.
+  // levels - 1, the absolute last level in the vector, is
+  // not used here. It originally was meant to be a sink
+  // in a network-flow sense, but is not necessary to KCL.
+  const auto last_level = g.levels.size() - 2;
+  for (auto u : g.levels.at(last_level)) {
+    for (auto& e : g.inputs.at(u)) {
+      auto v = e->src;
+      if (g.node_level[v] == last_level)
+        continue;
+
       auto R = e->fuse.R;
-      auto i = u - 1 - g.levels.at(1).size();
+      auto i = v - 1 - g.levels.at(zeroth_level).size();
 
       I.at(i) += -V / R;
     }
@@ -558,16 +576,23 @@ nodal_analysis(const Circuit& g, real V)
 }
 
 void
+calculate_current_kcl(Circuit& g, real V, std::vector<real>& currents)
+{
+  auto p = kcl(g, V);
+}
+
+void
 print_la(const std::pair<Matrix, Vector>& Ab)
 {
   const auto& A = Ab.first;
   const auto& b = Ab.second;
   const auto m = A.size();
-  const auto width = 7;
+  const auto width = 9;
+  const auto precision = 4;
 
   for (auto i = 0u; i < m; i++) {
     for (auto j = 0u; j < m + 2; j++) {
-      std::cout << std::setw(width);
+      std::cout << std::setw(width) << std::setprecision(precision);
       if (j < m) {
         std::cout << A[i][j];
       } else if (j == m) {
@@ -594,12 +619,13 @@ simulation(size_t L, real D, real V0, real deltaV)
   std::vector<real> currents(g.nodes.size());
 
   while (g.connected()) {
-    // std::cout << V << "\n";
-    // print_la(nodal_analysis(g, V));
+    std::cout << V << "\n";
+    print_la(kcl(g, V));
     iteration(g, V, currents);
     l.log(V, currents[sink]);
     V += deltaV;
   }
+  l.log(V, 0);
   draw_graph(diff_graph(original, g), "end");
 
   return l;
@@ -641,10 +667,10 @@ main(int argc, char** argv)
   }
 
   seed_rand();
-  auto start = now();
+  // auto start = now();
   auto s = simulation(L, D, 0, 0.1);
-  std::cout << s.iterations() << " iterations\n";
-  std::cout << elapsed(start) << " ms\n";
+  // std::cout << s.iterations() << " iterations\n";
+  // std::cout << elapsed(start) << " ms\n";
   std::ofstream out{ "output.csv" };
   s.show(out);
 }

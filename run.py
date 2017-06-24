@@ -21,17 +21,15 @@ import numpy as np
 import sys
 from subprocess import run, DEVNULL
 
-if len(sys.argv) < 3:
+if len(sys.argv) < 2:
     L = 14
-    D = 1.0
 else:
     L = sys.argv[1]
-    D = sys.argv[2]
 
-if len(sys.argv) < 4:
+if len(sys.argv) < 3:
     tipo = "t"
 else:
-    tipo = sys.argv[3]
+    tipo = sys.argv[2]
 
 outfolder = '.\\result\\'
 results = 'output.csv'
@@ -41,20 +39,30 @@ graph = 'graph-begin.dot'
 graphend = 'graph-end.dot'
 exe = '.\\out\\fracture.exe'
 
-run(f'{exe} {L} {D} {tipo}')
+Ds = [0, 0.2, 0.4, 0.6, 0.8, 1]
+data = []
 
-run(f'if not exist "{outfolder}" mkdir {outfolder}', shell=True)
+for D in Ds:
+    run(f'{exe} {L} {D} {tipo}')
 
-run(f'dot {graph} -Tpdf -o{outfolder}{pdf}')
-run(f'del {graph}', shell=True)
-run(f'start {outfolder}{pdf}', shell=True)
+    run(f'if not exist "{outfolder}" mkdir {outfolder}', shell=True)
 
-run(f'dot {graphend} -Tpdf -o{outfolder}{pdf2}')
-run(f'del {graphend}', shell=True)
-run(f'start {outfolder}{pdf2}', shell=True)
+    # run(f'dot {graph} -Tpdf -o{outfolder}{pdf}')
+    # run(f'del {graph}', shell=True)
+    # run(f'start {outfolder}{pdf}', shell=True)
 
-run(f'move {results} {outfolder}{results}', shell=True, stdout=DEVNULL)
+    # run(f'dot {graphend} -Tpdf -o{outfolder}{pdf2}')
+    # run(f'del {graphend}', shell=True)
+    # run(f'start {outfolder}{pdf2}', shell=True)
 
-data = np.genfromtxt(f'{outfolder}{results}', delimiter=',', skip_header=1, names=['V', 'I'])
-plt.plot(data['V'], data['I'], linestyle='-', marker='.', linewidth=1)
+    run(f'move {results} {outfolder}{D}{results}', shell=True, stdout=DEVNULL)
+
+    out = np.genfromtxt(f'{outfolder}{D}{results}', delimiter=',', skip_header=1, names=['V', 'I'])
+    data.append((D, out['V'], out['I']))
+    # plt.plot(data['V'], data['I'], linestyle='-', marker='.', linewidth=1)
+
+for D, V, I in data:
+    plt.plot(V, I, label=f'D={D*100}%')
+
+plt.legend(loc='upper left')
 plt.show()
