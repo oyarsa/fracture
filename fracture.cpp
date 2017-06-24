@@ -182,13 +182,16 @@ nextreal()
   return nextrand() / real(UINT64_MAX);
 }
 
-Fuse
-random_fuse(real D, real R)
+auto base_resistance = Ohms{ 20 };
+auto base_Imax = Amperes{ 20 };
+
+Ohms
+random_resist(real D, Ohms R = base_resistance)
 {
   if (nextreal() <= D) {
     R *= 0.5 + nextreal();
   }
-  return Fuse(R, R);
+  return R;
 }
 
 Circuit
@@ -229,10 +232,12 @@ generate_titled_circuit(size_t L, real D)
       curr[j] = next++;
       g.add_node(curr[j], level);
       if (nx >= 0) {
-        g.add_edge(Edge(prev[nx], curr[j], random_fuse(D, 20)));
+        auto R = random_resist(D);
+        g.add_edge(Edge(prev[nx], curr[j], Fuse(R, R)));
       }
       if (ny < max) {
-        g.add_edge(Edge(prev[ny], curr[j], random_fuse(D, 20)));
+        auto R = random_resist(D);
+        g.add_edge(Edge(prev[ny], curr[j], Fuse(R, R)));
       }
     }
 
@@ -285,13 +290,11 @@ generate_square_circuit(size_t L, real D)
       curr[j] = next++;
       g.add_node(curr[j], level);
 
-      auto fuseH = random_fuse(D, 20 * horiz);
-      fuseH.Imax = 20;
-      g.add_edge(Edge(prev[j], curr[j], fuseH));
+      auto hR = random_resist(D);
+      g.add_edge(Edge(prev[j], curr[j], Fuse(hR * horiz, hR)));
       if (j > 0) {
-        auto fuseV = random_fuse(D, 20 * vert);
-        fuseV.Imax = 20;
-        g.add_edge(Edge(curr[j - 1], curr[j], fuseV));
+        auto vR = random_resist(D);
+        g.add_edge(Edge(curr[j - 1], curr[j], Fuse(vR * vert, vR)));
       }
     }
     for (auto j = 0u; j < L; j++) {
@@ -374,7 +377,7 @@ void
 iteration(Circuit& g, real V, std::vector<real>& currents)
 {
   // Total current in circuit. Maybe improve this?
-  const auto total_current = 20 * V;
+  const auto total_current = base_Imax * V;
 
   // Distribute the current evenly to the first level.
   for (auto& out : g.adjacencies[0]) {

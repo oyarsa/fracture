@@ -19,7 +19,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import sys
-from subprocess import run
+from subprocess import run, DEVNULL
 
 if len(sys.argv) < 3:
     L = 14
@@ -33,20 +33,28 @@ if len(sys.argv) < 4:
 else:
     tipo = sys.argv[3]
 
+outfolder = '.\\result\\'
 results = 'output.csv'
 pdf = 'output.pdf'
 pdf2 = 'result.pdf'
 graph = 'graph-begin.dot'
 graphend = 'graph-end.dot'
-exe = 'fracture.exe'
+exe = '.\\out\\fracture.exe'
 
 run(f'{exe} {L} {D} {tipo}')
 
-run(f'dot {graph} -Tpdf -o{pdf}')
-run(f'start {pdf}', shell=True)
-run(f'dot {graphend} -Tpdf -o{pdf2}')
-run(f'start {pdf2}', shell=True)
+run(f'if not exist "{outfolder}" mkdir {outfolder}', shell=True)
 
-data = np.genfromtxt(results, delimiter=',', skip_header=1, names=['V', 'I'])
+run(f'dot {graph} -Tpdf -o{outfolder}{pdf}')
+run(f'del {graph}', shell=True)
+run(f'start {outfolder}{pdf}', shell=True)
+
+run(f'dot {graphend} -Tpdf -o{outfolder}{pdf2}')
+run(f'del {graphend}', shell=True)
+run(f'start {outfolder}{pdf2}', shell=True)
+
+run(f'move {results} {outfolder}{results}', shell=True, stdout=DEVNULL)
+
+data = np.genfromtxt(f'{outfolder}{results}', delimiter=',', skip_header=1, names=['V', 'I'])
 plt.plot(data['V'], data['I'], linestyle='-', marker='.', linewidth=1)
 plt.show()
