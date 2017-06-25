@@ -17,6 +17,7 @@
 */
 
 #include <algorithm>
+#include <cassert>
 #include <chrono>
 #include <cstdint>
 #include <ctime>
@@ -38,6 +39,9 @@ using NodeId_t = size_t;
 using real = double;
 using Amperes = real;
 using Ohms = real;
+
+using Matrix = Eigen::MatrixXd;
+using Vector = Eigen::VectorXd;
 
 const real inf = 1e9;
 
@@ -78,6 +82,7 @@ struct Circuit
   std::vector<std::vector<NodeId_t>> levels;
   std::vector<std::vector<std::shared_ptr<Edge>>> adjacencies;
   std::vector<std::vector<std::shared_ptr<Edge>>> inputs;
+  Matrix admittance_matrix;
 
   Circuit(size_t n)
     : nodes(n)
@@ -85,6 +90,7 @@ struct Circuit
     , levels()
     , adjacencies(n)
     , inputs(n)
+    , admittance_matrix(Matrix::Zero(n, n))
   {
   }
 
@@ -121,6 +127,10 @@ struct Circuit
 
   void add_edge(const Edge& edge)
   {
+    auto src = edge.src;
+    auto dst = edge.dst;
+    admittance_matrix(src, dst) = 1 / edge.fuse.R;
+
     auto e = std::make_shared<Edge>(edge);
     adjacencies[edge.src].push_back(e);
     inputs[edge.dst].push_back(e);
@@ -128,6 +138,7 @@ struct Circuit
 
   void remove_input_edge(const std::shared_ptr<Edge>& edge)
   {
+    admittance_matrix(edge->src, edge->dst) = 0;
     auto& ins = inputs[edge->dst];
     ins.erase(std::remove(begin(ins), end(ins), edge), end(ins));
   }
@@ -137,6 +148,7 @@ struct Circuit
     auto& ins = inputs[node];
     for (auto& in : ins) {
       auto& adj = adjacencies[in->src];
+      admittance_matrix(in->src, in->dst) = 0;
       adj.erase(std::remove(begin(adj), end(adj), in), end(adj));
       if (adj.empty()) {
         remove_node_inputs(in->src);
@@ -157,15 +169,19 @@ struct Circuit
     return std::find(begin(adj), end(adj), e) != end(adj);
   }
 
-  const Edge* edge_between(NodeId_t u, NodeId_t v) const
+  Ohms edge_between(NodeId_t u, NodeId_t v) const
   {
+    // auto R = admittance_matrix(u, v);
+    // if (R)
+    //   return R;
+    // return admittance_matrix(v, u);
     auto e = find_edge(u, v);
     if (e)
-      return e;
+      return e->fuse.R;
     e = find_edge(v, u);
     if (e)
-      return e;
-    return nullptr;
+      return e->fuse.R;
+    return 0;
   }
 
   const Edge* find_edge(NodeId_t src, NodeId_t dst) const
@@ -307,6 +323,7 @@ generate_square_circuit(size_t L, real D)
 
   auto vert = 0.99;
   auto horiz = 0.01;
+
   for (auto i = 1u; i < L; i++) {
     for (auto j = 0u; j < L; j++) {
       curr[j] = next++;
@@ -516,42 +533,35 @@ draw_graph(const EdgeMap& em, const std::string& id = "begin")
   // std::cout << "Graph printed: " << id << "\n";
 }
 
-using Matrix = Eigen::MatrixXd;
-using Vector = Eigen::VectorXd;
-
 std::pair<Matrix, Vector>
 kcl(const Circuit& g, real V)
 {
   // http://mathonweb.com/help/backgd5a.htm
+
   auto m = g.effective_node_count();
-  auto A = Matrix(m, m);
+
+  //G_jk
+  // for (auto i = 0u; i < m; i++) {
+  //   for (auto j = 0u; j < m; j++) {
+  //     auto u = g.actual_node(i);
+  //     auto v = g.actual_node(j);
+  //     A(i, j) = -(g.admittance_matrix(u, v) + g.admittance_matrix(v, u));
+  //   }
+  // }
+  auto& M = g.admittance_matrix;
+  auto fst = g.actual_node(0);
+  Matrix A = -(M.block(fst, fst, m, m) + M.transpose().block(fst, fst, m, m));
 
   // G_jj
   for (auto i = 0u; i < m; i++) {
-    auto v = i + 1 + g.levels.at(1).size();
-    auto total = real{ 0 };
+    auto v = g.actual_node(i);
+    assert(A(i, i) == 0);
 
     for (auto& x : g.adjacencies.at(v)) {
-      total += 1. / x->fuse.R;
+      A(i, i) += 1. / x->fuse.R;
     }
     for (auto& x : g.inputs.at(v)) {
-      total += 1. / x->fuse.R;
-    }
-
-    A(i, i) = total;
-  }
-
-  //G_jk
-  for (auto i = 0u; i < m; i++) {
-    for (auto j = 0u; j < m; j++) {
-      if (i == j)
-        continue;
-
-      auto u = i + 1 + g.levels.at(1).size();
-      auto v = j + 1 + g.levels.at(1).size();
-      auto edge = g.edge_between(u, v);
-      auto value = edge ? -1. / edge->fuse.R : 0;
-      A(i, j) = value;
+      A(i, i) += 1. / x->fuse.R;
     }
   }
 
@@ -569,27 +579,9 @@ kcl(const Circuit& g, real V)
       auto v = e->dst;
       auto i = v - 1 - g.levels.at(zeroth_level).size();
 
-      I(i) = I(i) + V / R;
+      I(i) += V / R;
     }
   }
-
-  // // Last level is the contact with ground, so levels - 2.
-  // // levels - 1, the absolute last level in the vector, is
-  // // not used here. It originally was meant to be a sink
-  // // in a network-flow sense, but is not necessary to KCL.
-  // const auto last_level = g.levels.size() - 2;
-  // for (auto u : g.levels.at(last_level)) {
-  //   for (auto& e : g.inputs.at(u)) {
-  //     auto v = e->src;
-  //     if (g.node_level[v] == last_level)
-  //       continue;
-
-  //     auto R = e->fuse.R;
-  //     auto i = v - 1 - g.levels.at(zeroth_level).size();
-
-  //     I(i) = I(i) - V / R;
-  //   }
-  // }
 
   return { A, I };
 }
@@ -662,7 +654,6 @@ calculate_current_kcl(Circuit& g, real Vtotal, std::vector<real>& currents)
   // std::cout << V;
   // std::cout << "\n";
   auto m = g.effective_node_count();
-  auto Is = std::vector<real>(m);
 
   for (auto node : g.levels[2]) {
     auto i = g.pseudo_node(node);
@@ -680,7 +671,6 @@ calculate_current_kcl(Circuit& g, real Vtotal, std::vector<real>& currents)
       auto Vj = j < m ? V[j] : 0;
       auto I = (V[i] - Vj) / e->fuse.R;
       e->current = I;
-      Is[i] += I;
     }
   }
   verify_kcl(g);

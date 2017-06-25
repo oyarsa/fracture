@@ -32,6 +32,11 @@ if len(sys.argv) < 3:
 else:
     tipo = sys.argv[2]
 
+if len(sys.argv) < 4:
+    Ds = [0, 0.2, 0.4, 0.6, 0.8, 1]
+else:
+    Ds = [float(x.strip()) for x in sys.argv[3].split(' ')]
+
 outfolder = 'results'
 results = 'output.csv'
 pdf = 'output.pdf'
@@ -45,9 +50,6 @@ if sys.platform == 'win32':
 
 exe = os.path.join('out', exename)
 
-Ds = [0]
-Ds = [0, 0.2, 0.4, 0.6, 0.8, 1]
-data = []
 
 if not os.path.isfile(exe):
     run(os.path.join(sys.path[0], 'build'), shell=True)
@@ -57,12 +59,12 @@ for D in Ds:
 
     os.makedirs(outfolder, exist_ok=True)
 
-    # begin_path = os.path.join(outfolder, pdf)
+    # begin_path = os.path.join(outfolder, str(D) + pdf)
     # run(f'dot {graph} -Tpdf -o{begin_path}')
     # os.remove(graph)
     # run(f'start {begin_path}', shell=True)
 
-    # end_path = os.path.join(outfolder, pdf2)
+    # end_path = os.path.join(outfolder, str(D) + pdf2)
     # run(f'dot {graphend} -Tpdf -o{end_path}')
     # os.remove(graphend)
     # run(f'start {end_path}', shell=True)
@@ -71,11 +73,7 @@ for D in Ds:
     os.replace(results, result_path)
 
     out = np.genfromtxt(result_path, delimiter=',', skip_header=1, names=['V', 'I'])
-    data.append((D, out['V'], out['I']))
-    # plt.plot(data['V'], data['I'], linestyle='-', marker='.', linewidth=1)
-
-for D, V, I in data:
-    plt.plot(V, I, label=f'D={int(D*100)}%')
+    plt.plot(out['V'], out['I'], label=f'D={int(D*100)}%')
 
 plt.legend(loc='upper left')
 plt.show()
