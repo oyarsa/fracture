@@ -28,6 +28,9 @@
 #include <utility>
 #include <vector>
 
+#include <Eigen/Dense>
+#define EIGEN_NO_DEBUG
+
 using std::size_t;
 
 using time_point = std::chrono::high_resolution_clock::time_point;
@@ -83,6 +86,22 @@ struct Circuit
     , adjacencies(n)
     , inputs(n)
   {
+  }
+
+  std::size_t pseudo_node(NodeId_t v) const
+  {
+    return v - 1 - levels.at(1).size();
+  }
+
+  NodeId_t actual_node(std::size_t i) const
+  {
+    return i + 1 + levels.at(1).size();
+  }
+
+  std::size_t effective_node_count() const
+  {
+    return nodes.size() - 2 -
+           (levels.at(1).size() + levels.at(levels.size() - 2).size());
   }
 
   void add_node(NodeId_t node, size_t level)
@@ -407,10 +426,10 @@ calculate_current(Circuit& g, real V, std::vector<real>& currents)
 void
 iteration(Circuit& g, real V, std::vector<real>& currents)
 {
-  calculate_current(g, V, currents);
-
   for (auto p : g.nodes) {
     auto& adj = g.adjacencies[p];
+    if (adj.empty())
+      continue;
     auto it = begin(adj);
 
     while (it != end(adj)) {
@@ -423,8 +442,10 @@ iteration(Circuit& g, real V, std::vector<real>& currents)
         ++it;
       }
     }
-    if (p != g.sink() && adj.empty())
+    if (p != g.sink() && adj.empty()) {
       g.remove_node_inputs(p);
+      // std::cout << "Disconected node: " << p << "\n";
+    }
   }
 }
 
@@ -495,16 +516,15 @@ draw_graph(const EdgeMap& em, const std::string& id = "begin")
   // std::cout << "Graph printed: " << id << "\n";
 }
 
-using Vector = std::vector<real>;
-using Matrix = std::vector<Vector>;
+using Matrix = Eigen::MatrixXd;
+using Vector = Eigen::VectorXd;
 
 std::pair<Matrix, Vector>
 kcl(const Circuit& g, real V)
 {
   // http://mathonweb.com/help/backgd5a.htm
-  auto m = g.nodes.size() - 2 -
-           (g.levels.at(1).size() + g.levels.at(g.levels.size() - 2).size());
-  auto A = Matrix(m, Vector(m));
+  auto m = g.effective_node_count();
+  auto A = Matrix(m, m);
 
   // G_jj
   for (auto i = 0u; i < m; i++) {
@@ -518,7 +538,7 @@ kcl(const Circuit& g, real V)
       total += 1. / x->fuse.R;
     }
 
-    A[i][i] = total;
+    A(i, i) = total;
   }
 
   //G_jk
@@ -531,12 +551,11 @@ kcl(const Circuit& g, real V)
       auto v = j + 1 + g.levels.at(1).size();
       auto edge = g.edge_between(u, v);
       auto value = edge ? -1. / edge->fuse.R : 0;
-      A[i][j] = value;
+      A(i, j) = value;
     }
   }
 
-  auto I = Vector(m, 0.0);
-
+  Vector I = Vector::Zero(m);
   // First level is actually the third absolute one because
   // the first is a source in a network-flow sense, which
   // is unnecessary in KCL. The second absolute becomes the zeroth
@@ -550,35 +569,29 @@ kcl(const Circuit& g, real V)
       auto v = e->dst;
       auto i = v - 1 - g.levels.at(zeroth_level).size();
 
-      I.at(i) += V / R;
+      I(i) = I(i) + V / R;
     }
   }
 
-  // Last level is the contact with ground, so levels - 2.
-  // levels - 1, the absolute last level in the vector, is
-  // not used here. It originally was meant to be a sink
-  // in a network-flow sense, but is not necessary to KCL.
-  const auto last_level = g.levels.size() - 2;
-  for (auto u : g.levels.at(last_level)) {
-    for (auto& e : g.inputs.at(u)) {
-      auto v = e->src;
-      if (g.node_level[v] == last_level)
-        continue;
+  // // Last level is the contact with ground, so levels - 2.
+  // // levels - 1, the absolute last level in the vector, is
+  // // not used here. It originally was meant to be a sink
+  // // in a network-flow sense, but is not necessary to KCL.
+  // const auto last_level = g.levels.size() - 2;
+  // for (auto u : g.levels.at(last_level)) {
+  //   for (auto& e : g.inputs.at(u)) {
+  //     auto v = e->src;
+  //     if (g.node_level[v] == last_level)
+  //       continue;
 
-      auto R = e->fuse.R;
-      auto i = v - 1 - g.levels.at(zeroth_level).size();
+  //     auto R = e->fuse.R;
+  //     auto i = v - 1 - g.levels.at(zeroth_level).size();
 
-      I.at(i) += -V / R;
-    }
-  }
+  //     I(i) = I(i) - V / R;
+  //   }
+  // }
 
   return { A, I };
-}
-
-void
-calculate_current_kcl(Circuit& g, real V, std::vector<real>& currents)
-{
-  auto p = kcl(g, V);
 }
 
 void
@@ -586,7 +599,7 @@ print_la(const std::pair<Matrix, Vector>& Ab)
 {
   const auto& A = Ab.first;
   const auto& b = Ab.second;
-  const auto m = A.size();
+  const auto m = A.rows();
   const auto width = 9;
   const auto precision = 4;
 
@@ -594,16 +607,98 @@ print_la(const std::pair<Matrix, Vector>& Ab)
     for (auto j = 0u; j < m + 2; j++) {
       std::cout << std::setw(width) << std::setprecision(precision);
       if (j < m) {
-        std::cout << A[i][j];
+        std::cout << A(i, j);
       } else if (j == m) {
         std::cout << "X" << (i + 1);
       } else if (j > m) {
-        std::cout << b[i];
+        std::cout << b(i);
       }
     }
     std::cout << "\n";
   }
   std::cout << "\n";
+}
+
+bool
+almost_equal(real a, real b, real eps = 1e-9)
+{
+  return std::fabs(a - b) < eps;
+}
+
+void
+verify_kcl(Circuit& g)
+{
+  auto m = g.effective_node_count();
+
+  for (auto i = 0u; i < m; i++) {
+    auto node = g.actual_node(i);
+
+    auto in = 0.0;
+    for (auto& e : g.inputs[node])
+      in += e->current;
+
+    auto out = 0.0;
+    for (auto& e : g.adjacencies[node])
+      out += e->current;
+
+    if (!almost_equal(in, out)) {
+      std::cout << "Ops\n";
+      std::cout << "Node: " << node << "\n";
+      std::cout << "In: " << in << ". Out: " << out << "\n";
+    }
+  }
+}
+
+void
+calculate_current_kcl(Circuit& g, real Vtotal, std::vector<real>& currents)
+{
+  auto p = kcl(g, Vtotal);
+  // print_la(p);
+  Eigen::LDLT<Eigen::Ref<Matrix>> ldlt(p.first);
+  // Vector V = p.first.ldlt().solve(p.second);
+  Vector V = ldlt.solve(p.second);
+  // std::cout << "Total: " << Vtotal << "\n";
+  // std::cout << "V:\n";
+  // std::cout << V;
+  // std::cout << "\n";
+  auto m = g.effective_node_count();
+  auto Is = std::vector<real>(m);
+
+  for (auto node : g.levels[2]) {
+    auto i = g.pseudo_node(node);
+    for (auto& e : g.inputs[node]) {
+      auto I = (Vtotal - V[i]) / e->fuse.R;
+      e->current = I;
+    }
+  }
+
+  for (auto i = 0u; i < m; i++) {
+    auto node = g.actual_node(i);
+    // Calculate output currents via KCL
+    for (auto& e : g.adjacencies[node]) {
+      auto j = g.pseudo_node(e->dst);
+      auto Vj = j < m ? V[j] : 0;
+      auto I = (V[i] - Vj) / e->fuse.R;
+      e->current = I;
+      Is[i] += I;
+    }
+  }
+  verify_kcl(g);
+
+  auto total_current = Amperes(0);
+
+  for (auto node : g.levels[g.levels.size() - 3]) {
+    for (auto& e : g.adjacencies[node]) {
+      total_current += e->current;
+    }
+  }
+
+  currents[g.sink()] = total_current;
+
+  // for (auto i = 0u; i < m; i++)
+  //   std::cout << g.actual_node(i) << ": " << Is[i] << "\n";
+
+  // std::cout << "\nTotal: " << total_current << "\n\n\n";
 }
 
 Log
@@ -619,8 +714,11 @@ simulation(size_t L, real D, real V0, real deltaV)
   std::vector<real> currents(g.nodes.size());
 
   while (g.connected()) {
-    std::cout << V << "\n";
-    print_la(kcl(g, V));
+    // std::cout << V << "\n";
+    // print_la(kcl(g, V));
+    calculate_current_kcl(g, V, currents);
+    // calculate_current(g, V, currents);
+
     iteration(g, V, currents);
     l.log(V, currents[sink]);
     V += deltaV;

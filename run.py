@@ -16,6 +16,7 @@
   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
+import os
 import matplotlib.pyplot as plt
 import numpy as np
 import sys
@@ -31,38 +32,50 @@ if len(sys.argv) < 3:
 else:
     tipo = sys.argv[2]
 
-outfolder = '.\\result\\'
+outfolder = 'results'
 results = 'output.csv'
 pdf = 'output.pdf'
 pdf2 = 'result.pdf'
 graph = 'graph-begin.dot'
 graphend = 'graph-end.dot'
-exe = '.\\out\\fracture.exe'
 
+exename = 'fracture'
+if sys.platform == 'win32':
+    exename += '.exe'
+
+exe = os.path.join('out', exename)
+
+Ds = [0]
 Ds = [0, 0.2, 0.4, 0.6, 0.8, 1]
 data = []
+
+if not os.path.isfile(exe):
+    run(os.path.join(sys.path[0], 'build'), shell=True)
 
 for D in Ds:
     run(f'{exe} {L} {D} {tipo}')
 
-    run(f'if not exist "{outfolder}" mkdir {outfolder}', shell=True)
+    os.makedirs(outfolder, exist_ok=True)
 
-    # run(f'dot {graph} -Tpdf -o{outfolder}{pdf}')
-    # run(f'del {graph}', shell=True)
-    # run(f'start {outfolder}{pdf}', shell=True)
+    # begin_path = os.path.join(outfolder, pdf)
+    # run(f'dot {graph} -Tpdf -o{begin_path}')
+    # os.remove(graph)
+    # run(f'start {begin_path}', shell=True)
 
-    # run(f'dot {graphend} -Tpdf -o{outfolder}{pdf2}')
-    # run(f'del {graphend}', shell=True)
-    # run(f'start {outfolder}{pdf2}', shell=True)
+    # end_path = os.path.join(outfolder, pdf2)
+    # run(f'dot {graphend} -Tpdf -o{end_path}')
+    # os.remove(graphend)
+    # run(f'start {end_path}', shell=True)
 
-    run(f'move {results} {outfolder}{D}{results}', shell=True, stdout=DEVNULL)
+    result_path = os.path.join(outfolder, f'{D}.csv')
+    os.replace(results, result_path)
 
-    out = np.genfromtxt(f'{outfolder}{D}{results}', delimiter=',', skip_header=1, names=['V', 'I'])
+    out = np.genfromtxt(result_path, delimiter=',', skip_header=1, names=['V', 'I'])
     data.append((D, out['V'], out['I']))
     # plt.plot(data['V'], data['I'], linestyle='-', marker='.', linewidth=1)
 
 for D, V, I in data:
-    plt.plot(V, I, label=f'D={D*100}%')
+    plt.plot(V, I, label=f'D={int(D*100)}%')
 
 plt.legend(loc='upper left')
 plt.show()
