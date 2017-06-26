@@ -129,7 +129,8 @@ struct Circuit
   {
     auto src = edge.src;
     auto dst = edge.dst;
-    admittance_matrix(src, dst) = 1 / edge.fuse.R;
+    if (edge.fuse.R != 0)
+      admittance_matrix(src, dst) = 1 / edge.fuse.R;
 
     auto e = std::make_shared<Edge>(edge);
     adjacencies[edge.src].push_back(e);
@@ -412,8 +413,8 @@ calculate_ratios(const std::vector<std::shared_ptr<Edge>>& outputs)
   return ratios;
 }
 
-void
-calculate_current(Circuit& g, real V, std::vector<real>& currents)
+Amperes
+calculate_current(Circuit& g, real V)
 {
   // Total current in circuit. Maybe improve this?
   const auto total_current = base_Imax * V;
@@ -430,7 +431,6 @@ calculate_current(Circuit& g, real V, std::vector<real>& currents)
         current += e->current;
       }
 
-      currents[p] = current;
       auto& adj = g.adjacencies[p];
       auto ratios = calculate_ratios(adj);
       for (auto i = 0u; i < adj.size(); i++) {
@@ -438,10 +438,12 @@ calculate_current(Circuit& g, real V, std::vector<real>& currents)
       }
     }
   }
+
+  return total_current;
 }
 
 void
-iteration(Circuit& g, real V, std::vector<real>& currents)
+iteration(Circuit& g, real V)
 {
   for (auto p : g.nodes) {
     auto& adj = g.adjacencies[p];
@@ -451,7 +453,6 @@ iteration(Circuit& g, real V, std::vector<real>& currents)
 
     while (it != end(adj)) {
       auto& e = *it;
-      // std::cout << e->src << ": " << e->dst << "  -  " << e->current << "\n";
       if (e->fuse.blown(e->current)) {
         g.remove_input_edge(e);
         it = adj.erase(it);
@@ -461,7 +462,6 @@ iteration(Circuit& g, real V, std::vector<real>& currents)
     }
     if (p != g.sink() && adj.empty()) {
       g.remove_node_inputs(p);
-      // std::cout << "Disconected node: " << p << "\n";
     }
   }
 }
@@ -539,49 +539,20 @@ kcl(const Circuit& g, real V)
   // http://mathonweb.com/help/backgd5a.htm
 
   auto m = g.effective_node_count();
-
-  //G_jk
-  // for (auto i = 0u; i < m; i++) {
-  //   for (auto j = 0u; j < m; j++) {
-  //     auto u = g.actual_node(i);
-  //     auto v = g.actual_node(j);
-  //     A(i, j) = -(g.admittance_matrix(u, v) + g.admittance_matrix(v, u));
-  //   }
-  // }
   auto& M = g.admittance_matrix;
   auto fst = g.actual_node(0);
+
   Matrix A = -(M.block(fst, fst, m, m) + M.transpose().block(fst, fst, m, m));
+  A.diagonal() =
+    (M.rowwise().sum() + M.colwise().sum().transpose()).segment(fst, m);
 
-  // G_jj
-  for (auto i = 0u; i < m; i++) {
-    auto v = g.actual_node(i);
-    assert(A(i, i) == 0);
-
-    for (auto& x : g.adjacencies.at(v)) {
-      A(i, i) += 1. / x->fuse.R;
-    }
-    for (auto& x : g.inputs.at(v)) {
-      A(i, i) += 1. / x->fuse.R;
-    }
-  }
-
-  Vector I = Vector::Zero(m);
   // First level is actually the third absolute one because
   // the first is a source in a network-flow sense, which
   // is unnecessary in KCL. The second absolute becomes the zeroth
-  // because it is the contact with Vcc, and will be used
-  // to calculate the offsets.
-  const auto zeroth_level = 1;
-  // I_j
-  for (auto u : g.levels.at(zeroth_level)) {
-    for (auto& e : g.adjacencies.at(u)) {
-      auto R = e->fuse.R;
-      auto v = e->dst;
-      auto i = v - 1 - g.levels.at(zeroth_level).size();
-
-      I(i) += V / R;
-    }
-  }
+  // because it is the contact with Vcc
+  auto size = g.levels[2].size();
+  Vector I = Vector::Zero(m);
+  I.segment(0, size) = (V * M).colwise().sum().segment(fst, size);
 
   return { A, I };
 }
@@ -641,19 +612,72 @@ verify_kcl(Circuit& g)
   }
 }
 
-void
-calculate_current_kcl(Circuit& g, real Vtotal, std::vector<real>& currents)
+std::pair<Matrix, std::vector<std::size_t>>
+remove_zeroes_matrix(const Matrix& A)
 {
-  auto p = kcl(g, Vtotal);
+  namespace e = Eigen;
+
+  e::Matrix<bool, 1, e::Dynamic> non_zero_cols = A.cast<bool>().colwise().any();
+
+  Matrix res(non_zero_cols.count(), non_zero_cols.count());
+  std::vector<std::size_t> keep;
+  keep.reserve(A.rows());
+
+  e::Index j = 0;
+
+  for (auto u = 0u; u < A.cols(); u++) {
+    if (!non_zero_cols(u))
+      continue;
+
+    e::Index i = 0;
+
+    for (auto v = 0u; v < A.rows(); v++) {
+      if (non_zero_cols(v)) {
+        res(i, j) = A(v, u);
+        i++;
+      }
+    }
+    keep.push_back(u);
+    j++;
+  }
+
+  return { res, keep };
+}
+
+Vector
+remove_zeroes_vector(const Vector& v, const std::vector<std::size_t>& keep)
+{
+  Vector res(keep.size());
+
+  Eigen::Index i = 0;
+  for (auto x : keep) {
+    res(i++) = v(x);
+  }
+
+  return res;
+}
+
+Amperes
+calculate_current_kcl(Circuit& g, real Vtotal)
+{
   // print_la(p);
-  Eigen::LDLT<Eigen::Ref<Matrix>> ldlt(p.first);
-  // Vector V = p.first.ldlt().solve(p.second);
-  Vector V = ldlt.solve(p.second);
-  // std::cout << "Total: " << Vtotal << "\n";
-  // std::cout << "V:\n";
-  // std::cout << V;
-  // std::cout << "\n";
+
+  auto p = kcl(g, Vtotal);
+  auto q = remove_zeroes_matrix(p.first);
+
+  auto& A = q.first;
+  auto& keep = q.second;
+  auto II = remove_zeroes_vector(p.second, keep);
+
+  Eigen::LLT<Eigen::Ref<Matrix>> solver(A);
+  Vector VV = solver.solve(II);
   auto m = g.effective_node_count();
+
+  Vector V = Vector::Zero(m);
+  Eigen::Index idx = 0;
+  for (auto x : keep) {
+    V(x) = VV(idx++);
+  }
 
   for (auto node : g.levels[2]) {
     auto i = g.pseudo_node(node);
@@ -673,7 +697,7 @@ calculate_current_kcl(Circuit& g, real Vtotal, std::vector<real>& currents)
       e->current = I;
     }
   }
-  verify_kcl(g);
+  // verify_kcl(g);
 
   auto total_current = Amperes(0);
 
@@ -683,12 +707,7 @@ calculate_current_kcl(Circuit& g, real Vtotal, std::vector<real>& currents)
     }
   }
 
-  currents[g.sink()] = total_current;
-
-  // for (auto i = 0u; i < m; i++)
-  //   std::cout << g.actual_node(i) << ": " << Is[i] << "\n";
-
-  // std::cout << "\nTotal: " << total_current << "\n\n\n";
+  return total_current;
 }
 
 Log
@@ -706,11 +725,11 @@ simulation(size_t L, real D, real V0, real deltaV)
   while (g.connected()) {
     // std::cout << V << "\n";
     // print_la(kcl(g, V));
-    calculate_current_kcl(g, V, currents);
-    // calculate_current(g, V, currents);
+    auto current = calculate_current_kcl(g, V);
+    // calculate_current(g, V);
 
-    iteration(g, V, currents);
-    l.log(V, currents[sink]);
+    iteration(g, V);
+    l.log(V, current);
     V += deltaV;
   }
   l.log(V, 0);
@@ -756,7 +775,7 @@ main(int argc, char** argv)
 
   seed_rand();
   // auto start = now();
-  auto s = simulation(L, D, 0, 0.1);
+  auto s = simulation(L, D, 50, 5);
   // std::cout << s.iterations() << " iterations\n";
   // std::cout << elapsed(start) << " ms\n";
   std::ofstream out{ "output.csv" };
