@@ -533,30 +533,6 @@ draw_graph(const EdgeMap& em, const std::string& id = "begin")
   // std::cout << "Graph printed: " << id << "\n";
 }
 
-std::pair<Matrix, Vector>
-kcl(const Circuit& g, real V)
-{
-  // http://mathonweb.com/help/backgd5a.htm
-
-  auto m = g.effective_node_count();
-  auto& M = g.admittance_matrix;
-  auto fst = g.actual_node(0);
-
-  Matrix A = -(M.block(fst, fst, m, m) + M.transpose().block(fst, fst, m, m));
-  A.diagonal() =
-    (M.rowwise().sum() + M.colwise().sum().transpose()).segment(fst, m);
-
-  // First level is actually the third absolute one because
-  // the first is a source in a network-flow sense, which
-  // is unnecessary in KCL. The second absolute becomes the zeroth
-  // because it is the contact with Vcc
-  auto size = g.levels[2].size();
-  Vector I = Vector::Zero(m);
-  I.segment(0, size) = (V * M).colwise().sum().segment(fst, size);
-
-  return { A, I };
-}
-
 void
 print_la(const std::pair<Matrix, Vector>& Ab)
 {
@@ -612,28 +588,42 @@ verify_kcl(Circuit& g)
   }
 }
 
-std::pair<Matrix, std::vector<std::size_t>>
-remove_zeroes_matrix(const Matrix& A)
+Amperes
+calculate_current_kcl(Circuit& g, real Vtotal)
 {
   namespace e = Eigen;
 
-  e::Matrix<bool, 1, e::Dynamic> non_zero_cols = A.cast<bool>().colwise().any();
+  auto m = g.effective_node_count();
+  auto& M = g.admittance_matrix;
+  auto fst = g.actual_node(0);
 
-  Matrix res(non_zero_cols.count(), non_zero_cols.count());
+  //------ Building coefficient matrix
+  Matrix coefKCL =
+    -(M.block(fst, fst, m, m) + M.transpose().block(fst, fst, m, m));
+  coefKCL.diagonal() =
+    (M.rowwise().sum() + M.colwise().sum().transpose()).segment(fst, m);
+
+  //------ Building independent term
+  auto size = g.levels[2].size();
+  Vector currentsKCL = Vector::Zero(m);
+  currentsKCL.segment(0, size) =
+    (Vtotal * M).colwise().sum().segment(fst, size);
+
+  //------ Removing zeroed rows and columns from coef matrix
+  e::Matrix<bool, 1, e::Dynamic> non_zero_cols =
+    coefKCL.cast<bool>().colwise().any();
+
+  Matrix A(non_zero_cols.count(), non_zero_cols.count());
   std::vector<std::size_t> keep;
-  keep.reserve(A.rows());
+  keep.reserve(coefKCL.rows());
 
-  e::Index j = 0;
-
-  for (auto u = 0u; u < A.cols(); u++) {
+  for (e::Index u = 0, j = 0; u < coefKCL.cols(); u++) {
     if (!non_zero_cols(u))
       continue;
 
-    e::Index i = 0;
-
-    for (auto v = 0u; v < A.rows(); v++) {
+    for (e::Index v = 0, i = 0; v < coefKCL.rows(); v++) {
       if (non_zero_cols(v)) {
-        res(i, j) = A(v, u);
+        A(i, j) = coefKCL(v, u);
         i++;
       }
     }
@@ -641,44 +631,28 @@ remove_zeroes_matrix(const Matrix& A)
     j++;
   }
 
-  return { res, keep };
-}
-
-Vector
-remove_zeroes_vector(const Vector& v, const std::vector<std::size_t>& keep)
-{
-  Vector res(keep.size());
-
-  Eigen::Index i = 0;
-  for (auto x : keep) {
-    res(i++) = v(x);
+  //------ Removing elements from the independent term relative to the zeroed rows
+  Vector II(keep.size());
+  {
+    Eigen::Index i = 0;
+    for (auto x : keep) {
+      II(i++) = currentsKCL(x);
+    }
   }
 
-  return res;
-}
-
-Amperes
-calculate_current_kcl(Circuit& g, real Vtotal)
-{
-  // print_la(p);
-
-  auto p = kcl(g, Vtotal);
-  auto q = remove_zeroes_matrix(p.first);
-
-  auto& A = q.first;
-  auto& keep = q.second;
-  auto II = remove_zeroes_vector(p.second, keep);
-
+  //------ Solving the system
   Eigen::LLT<Eigen::Ref<Matrix>> solver(A);
   Vector VV = solver.solve(II);
-  auto m = g.effective_node_count();
 
   Vector V = Vector::Zero(m);
-  Eigen::Index idx = 0;
-  for (auto x : keep) {
-    V(x) = VV(idx++);
+  {
+    Eigen::Index i = 0;
+    for (auto x : keep) {
+      V(x) = VV(i++);
+    }
   }
 
+  //------Calculating currents to branches connected to Vcc
   for (auto node : g.levels[2]) {
     auto i = g.pseudo_node(node);
     for (auto& e : g.inputs[node]) {
@@ -687,9 +661,9 @@ calculate_current_kcl(Circuit& g, real Vtotal)
     }
   }
 
+  //------ Calculating output currents via Ohms law
   for (auto i = 0u; i < m; i++) {
     auto node = g.actual_node(i);
-    // Calculate output currents via KCL
     for (auto& e : g.adjacencies[node]) {
       auto j = g.pseudo_node(e->dst);
       auto Vj = j < m ? V[j] : 0;
@@ -697,8 +671,9 @@ calculate_current_kcl(Circuit& g, real Vtotal)
       e->current = I;
     }
   }
-  // verify_kcl(g);
+  verify_kcl(g);
 
+  //------ Calculating final current
   auto total_current = Amperes(0);
 
   for (auto node : g.levels[g.levels.size() - 3]) {
