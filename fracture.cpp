@@ -598,8 +598,9 @@ calculate_current_kcl(Circuit& g, real Vtotal)
   auto fst = g.actual_node(0);
 
   //------ Building coefficient matrix
-  Matrix coefKCL =
-    -(M.block(fst, fst, m, m) + M.transpose().block(fst, fst, m, m));
+  // Matrix coefKCL =
+  //   -(M.block(fst, fst, m, m) + M.transpose().block(fst, fst, m, m));
+  Matrix coefKCL = -(M + M.transpose()).block(fst, fst, m, m);
   coefKCL.diagonal() =
     (M.rowwise().sum() + M.colwise().sum().transpose()).segment(fst, m);
 
@@ -652,7 +653,7 @@ calculate_current_kcl(Circuit& g, real Vtotal)
     }
   }
 
-  //------Calculating currents to branches connected to Vcc
+  //------ Calculating currents to branches connected to Vcc
   for (auto node : g.levels[2]) {
     auto i = g.pseudo_node(node);
     for (auto& e : g.inputs[node]) {
