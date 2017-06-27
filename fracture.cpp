@@ -29,6 +29,7 @@
 #include <utility>
 #include <vector>
 
+#define EIGEN_USE_MKL_ALL
 #define EIGEN_NO_DEBUG
 #include <Eigen/Dense>
 
@@ -36,12 +37,12 @@ using std::size_t;
 
 using time_point = std::chrono::high_resolution_clock::time_point;
 using NodeId_t = size_t;
-using real = double;
+using real = float;
 using Amperes = real;
 using Ohms = real;
 
-using Matrix = Eigen::MatrixXd;
-using Vector = Eigen::VectorXd;
+using Matrix = Eigen::MatrixXf;
+using Vector = Eigen::VectorXf;
 
 const real inf = 1e9;
 
