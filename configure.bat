@@ -1,0 +1,1 @@
+call "C:\Program Files (x86)\IntelSWTools\compilers_and_libraries_2017.4.210\windows\mkl\bin\mklvars.bat" intel64

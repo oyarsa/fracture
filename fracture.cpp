@@ -47,7 +47,7 @@ using Vector = Eigen::VectorXf;
 const real inf = 1e9;
 
 bool
-almost_equal(real a, real b, real eps = 1e-9)
+almost_equal(real a, real b, real eps = 1e-3)
 {
   return std::fabs(a - b) < eps;
 }
@@ -154,19 +154,22 @@ struct Circuit
     auto u = pseudo_node(src);
     auto v = pseudo_node(dst);
 
-    if (u >= 0 && v < effective_node_count()) {
+    auto u_in_M = u >= 0 && u < effective_node_count();
+    auto v_in_M = v >= 0 && v < effective_node_count();
+
+    if (u_in_M && v_in_M) {
       coefKCL(u, v) = 0;
       coefKCL(v, u) = 0;
     }
 
-    if (u >= 0) {
+    if (u_in_M) {
       coefKCL(u, u) -= G;
       if (almost_equal(coefKCL(u, u), 0.0)) {
         coefKCL(u, u) = 0;
       }
     }
 
-    if (v < effective_node_count()) {
+    if (v_in_M) {
       coefKCL(v, v) -= G;
       if (almost_equal(coefKCL(v, v), 0.0)) {
         coefKCL(v, v) = 0;
@@ -259,8 +262,9 @@ nextreal()
   return nextrand() / real(UINT64_MAX);
 }
 
-auto base_resistance = Ohms{ 20 };
-auto base_Imax = Amperes{ 20 };
+auto k_base = real{ 10 };
+auto base_resistance = Ohms{ k_base };
+auto base_Imax = Amperes{ k_base };
 
 Ohms
 random_resist(real D, Ohms R = base_resistance)
@@ -360,8 +364,8 @@ generate_square_circuit(size_t L, real D)
   }
   level++;
 
-  auto vert = 0.99;
-  auto horiz = 0.01;
+  auto vert = 1;
+  auto horiz = 1;
 
   for (auto i = 1u; i < L; i++) {
     for (auto j = 0u; j < L; j++) {
@@ -492,7 +496,9 @@ iteration(Circuit& g, real V)
     while (it != end(adj)) {
       auto& e = *it;
       if (e->fuse.blown(e->current)) {
+        // std::cout << "53rd" << e->src << " " << e->dst << "\n";
         g.remove_input_edge(e);
+        // std::cout << "and 3rd\n";
         it = adj.erase(it);
       } else {
         ++it;
@@ -597,7 +603,7 @@ print_la(const std::pair<Matrix, Vector>& Ab)
 }
 
 void
-verify_kcl(Circuit& g)
+verify_kcl(Circuit& g, real Vtotal)
 {
   auto m = g.effective_node_count();
 
@@ -614,6 +620,7 @@ verify_kcl(Circuit& g)
 
     if (!almost_equal(in, out)) {
       std::cout << "Ops\n";
+      std::cout << "V: " << Vtotal << "\n";
       std::cout << "Node: " << node << "\n";
       std::cout << "In: " << in << ". Out: " << out << "\n";
     }
@@ -628,7 +635,7 @@ init_kcl(Circuit& g)
   auto fst = g.actual_node(0);
 
   //------ Building coefficient matrix
-  g.coefKCL = -(M.block(fst, fst, m, m) + M.transpose().block(fst, fst, m, m));
+  g.coefKCL = -(M + M.transpose()).block(fst, fst, m, m);
   g.coefKCL.diagonal() =
     (M.rowwise().sum() + M.colwise().sum().transpose()).segment(fst, m);
 }
@@ -647,9 +654,13 @@ calculate_current_kcl(Circuit& g, real Vtotal)
 
   //------ Building independent term
   auto size = g.levels[2].size();
-  Vector currentsKCL = Vector::Zero(m);
-  currentsKCL.segment(0, size) =
-    (Vtotal * M).colwise().sum().segment(fst, size);
+  // This is summing the voltages of the vertical wires as well, which is wrong
+  // Vector currentsKCL = Vector::Zero(m);
+  // currentsKCL.segment(0, size) =
+  //   (Vtotal * M).colwise().sum().segment(fst, size);
+  Vector currentsKCL =
+    (M.topRows(fst) * Vtotal).colwise().sum().segment(fst, m);
+  // std::cout << "Currents:\n" << currentsKCL.transpose() << "\n";
 
   //------ Removing zeroed rows and columns from coef matrix
   e::Matrix<bool, 1, e::Dynamic> non_zero_cols =
@@ -686,34 +697,50 @@ calculate_current_kcl(Circuit& g, real Vtotal)
   Eigen::LLT<Eigen::Ref<Matrix>> solver(A);
   Vector VV = solver.solve(II);
 
-  Vector V = Vector::Zero(m);
+  Vector V = Vector::Zero(g.nodes.size());
+  V.segment(0, fst) = Vector::Constant(fst, Vtotal);
   {
     Eigen::Index i = 0;
-    for (auto x : keep) {
-      V(x) = VV(i++);
-    }
+    for (auto x : keep)
+      V(g.actual_node(x)) = VV(i++);
   }
 
-  //------ Calculating currents to branches connected to Vcc
-  for (auto node : g.levels[2]) {
-    auto i = g.pseudo_node(node);
-    for (auto& e : g.inputs[node]) {
-      auto I = (Vtotal - V[i]) / e->fuse.R;
-      e->current = I;
-    }
-  }
-
-  //------ Calculating output currents via Ohms law
-  for (auto i = 0u; i < m; i++) {
-    auto node = g.actual_node(i);
+  for (auto node : g.nodes) {
     for (auto& e : g.adjacencies[node]) {
-      auto j = g.pseudo_node(e->dst);
-      auto Vj = j < m ? V[j] : 0;
-      auto I = (V[i] - Vj) / e->fuse.R;
+      auto I = e->fuse.R != 0 ? (V[node] - V[e->dst]) / e->fuse.R : 0;
       e->current = I;
     }
   }
-  // verify_kcl(g);
+
+  // Vector V = Vector::Zero(m);
+  // {
+  //   Eigen::Index i = 0;
+  //   for (auto x : keep) {
+  //     V(x) = VV(i++);
+  //   }
+  // }
+
+  // //------ Calculating currents to branches connected to Vcc
+  // for (auto node : g.levels[2]) {
+  //   auto i = g.pseudo_node(node);
+  //   for (auto& e : g.inputs[node]) {
+  //     auto I = (Vtotal - V[i]) / e->fuse.R;
+  //     e->current = I;
+  //   }
+  // }
+
+  // // //------ Calculating output currents via Ohms law
+  // for (auto i = 0u; i < m; i++) {
+  //   auto node = g.actual_node(i);
+  //   for (auto& e : g.adjacencies[node]) {
+  //     auto j = g.pseudo_node(e->dst);
+  //     auto Vj = j < m ? V[j] : 0;
+  //     auto I = (V[i] - Vj) / e->fuse.R;
+  //     e->current = I;
+  //   }
+  // }
+
+  verify_kcl(g, Vtotal);
 
   //------ Calculating final current
   auto total_current = Amperes(0);
@@ -740,13 +767,14 @@ simulation(size_t L, real D, real V0, real deltaV)
   init_kcl(g);
 
   while (g.connected()) {
+    // std::cout << g.coefKCL << "\n\n";
     // std::cout << V << "\n";
     // print_la(kcl(g, V));
-    auto current = calculate_current_kcl(g, V);
     // calculate_current(g, V);
+    auto current = calculate_current_kcl(g, V);
+    l.log(V, current);
 
     iteration(g, V);
-    l.log(V, current);
     V += deltaV;
   }
   l.log(V, 0);
@@ -792,7 +820,7 @@ main(int argc, char** argv)
 
   seed_rand();
   // auto start = now();
-  auto s = simulation(L, D, 50, 5);
+  auto s = simulation(L, D, 0, 0.1);
   // std::cout << s.iterations() << " iterations\n";
   // std::cout << elapsed(start) << " ms\n";
   std::ofstream out{ "output.csv" };

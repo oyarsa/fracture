@@ -50,6 +50,7 @@ if sys.platform == 'win32':
 
 exe = os.path.join('out', exename)
 
+print_graph = False
 
 if not os.path.isfile(exe):
     run(os.path.join(sys.path[0], 'build'), shell=True)
@@ -59,15 +60,16 @@ for D in Ds:
 
     os.makedirs(outfolder, exist_ok=True)
 
-    # begin_path = os.path.join(outfolder, str(D) + pdf)
-    # run(f'dot {graph} -Tpdf -o{begin_path}')
-    # os.remove(graph)
-    # run(f'start {begin_path}', shell=True)
+    if print_graph:
+        begin_path = os.path.join(outfolder, str(D) + pdf)
+        run(f'dot {graph} -Tpdf -o{begin_path}')
+        os.remove(graph)
+        run(f'start {begin_path}', shell=True)
 
-    # end_path = os.path.join(outfolder, str(D) + pdf2)
-    # run(f'dot {graphend} -Tpdf -o{end_path}')
-    # os.remove(graphend)
-    # run(f'start {end_path}', shell=True)
+        end_path = os.path.join(outfolder, str(D) + pdf2)
+        run(f'dot {graphend} -Tpdf -o{end_path}')
+        os.remove(graphend)
+        run(f'start {end_path}', shell=True)
 
     result_path = os.path.join(outfolder, f'{D}.csv')
     os.replace(results, result_path)
@@ -76,4 +78,4 @@ for D in Ds:
     plt.plot(out['V'], out['I'], label=f'D={int(D*100)}%')
 
 plt.legend(loc='upper left')
-plt.show()
+# plt.show()
