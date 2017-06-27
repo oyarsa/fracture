@@ -29,8 +29,8 @@
 #include <utility>
 #include <vector>
 
-#include <Eigen/Dense>
 #define EIGEN_NO_DEBUG
+#include <Eigen/Dense>
 
 using std::size_t;
 
@@ -44,6 +44,12 @@ using Matrix = Eigen::MatrixXd;
 using Vector = Eigen::VectorXd;
 
 const real inf = 1e9;
+
+bool
+almost_equal(real a, real b, real eps = 1e-9)
+{
+  return std::fabs(a - b) < eps;
+}
 
 struct Fuse
 {
@@ -83,6 +89,7 @@ struct Circuit
   std::vector<std::vector<std::shared_ptr<Edge>>> adjacencies;
   std::vector<std::vector<std::shared_ptr<Edge>>> inputs;
   Matrix admittance_matrix;
+  Matrix coefKCL;
 
   Circuit(size_t n)
     : nodes(n)
@@ -91,10 +98,11 @@ struct Circuit
     , adjacencies(n)
     , inputs(n)
     , admittance_matrix(Matrix::Zero(n, n))
+    , coefKCL()
   {
   }
 
-  std::size_t pseudo_node(NodeId_t v) const
+  Eigen::Index pseudo_node(NodeId_t v) const
   {
     return v - 1 - levels.at(1).size();
   }
@@ -137,9 +145,37 @@ struct Circuit
     inputs[edge.dst].push_back(e);
   }
 
+  void remove_edge(NodeId_t src, NodeId_t dst)
+  {
+    auto G = admittance_matrix(src, dst);
+    admittance_matrix(src, dst) = 0;
+
+    auto u = pseudo_node(src);
+    auto v = pseudo_node(dst);
+
+    if (u >= 0 && v < effective_node_count()) {
+      coefKCL(u, v) = 0;
+      coefKCL(v, u) = 0;
+    }
+
+    if (u >= 0) {
+      coefKCL(u, u) -= G;
+      if (almost_equal(coefKCL(u, u), 0.0)) {
+        coefKCL(u, u) = 0;
+      }
+    }
+
+    if (v < effective_node_count()) {
+      coefKCL(v, v) -= G;
+      if (almost_equal(coefKCL(v, v), 0.0)) {
+        coefKCL(v, v) = 0;
+      }
+    }
+  }
+
   void remove_input_edge(const std::shared_ptr<Edge>& edge)
   {
-    admittance_matrix(edge->src, edge->dst) = 0;
+    remove_edge(edge->src, edge->dst);
     auto& ins = inputs[edge->dst];
     ins.erase(std::remove(begin(ins), end(ins), edge), end(ins));
   }
@@ -148,8 +184,9 @@ struct Circuit
   {
     auto& ins = inputs[node];
     for (auto& in : ins) {
+      remove_edge(in->src, in->dst);
+
       auto& adj = adjacencies[in->src];
-      admittance_matrix(in->src, in->dst) = 0;
       adj.erase(std::remove(begin(adj), end(adj), in), end(adj));
       if (adj.empty()) {
         remove_node_inputs(in->src);
@@ -558,12 +595,6 @@ print_la(const std::pair<Matrix, Vector>& Ab)
   std::cout << "\n";
 }
 
-bool
-almost_equal(real a, real b, real eps = 1e-9)
-{
-  return std::fabs(a - b) < eps;
-}
-
 void
 verify_kcl(Circuit& g)
 {
@@ -588,21 +619,30 @@ verify_kcl(Circuit& g)
   }
 }
 
+void
+init_kcl(Circuit& g)
+{
+  auto m = g.effective_node_count();
+  auto& M = g.admittance_matrix;
+  auto fst = g.actual_node(0);
+
+  //------ Building coefficient matrix
+  g.coefKCL = -(M.block(fst, fst, m, m) + M.transpose().block(fst, fst, m, m));
+  g.coefKCL.diagonal() =
+    (M.rowwise().sum() + M.colwise().sum().transpose()).segment(fst, m);
+}
+
 Amperes
 calculate_current_kcl(Circuit& g, real Vtotal)
 {
   namespace e = Eigen;
 
   auto m = g.effective_node_count();
-  auto& M = g.admittance_matrix;
+  const auto& M = g.admittance_matrix;
   auto fst = g.actual_node(0);
 
-  //------ Building coefficient matrix
-  // Matrix coefKCL =
-  //   -(M.block(fst, fst, m, m) + M.transpose().block(fst, fst, m, m));
-  Matrix coefKCL = -(M + M.transpose()).block(fst, fst, m, m);
-  coefKCL.diagonal() =
-    (M.rowwise().sum() + M.colwise().sum().transpose()).segment(fst, m);
+  // Coefficient matrix
+  const auto& coefKCL = g.coefKCL;
 
   //------ Building independent term
   auto size = g.levels[2].size();
@@ -672,7 +712,7 @@ calculate_current_kcl(Circuit& g, real Vtotal)
       e->current = I;
     }
   }
-  verify_kcl(g);
+  // verify_kcl(g);
 
   //------ Calculating final current
   auto total_current = Amperes(0);
@@ -696,7 +736,7 @@ simulation(size_t L, real D, real V0, real deltaV)
   auto l = Log();
   auto sink = g.nodes.size() - 1;
 
-  std::vector<real> currents(g.nodes.size());
+  init_kcl(g);
 
   while (g.connected()) {
     // std::cout << V << "\n";
