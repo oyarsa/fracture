@@ -20,6 +20,7 @@
 #include <cassert>
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <ctime>
 #include <fstream>
 #include <iomanip>
@@ -63,7 +64,7 @@ struct Fuse
   {
   }
 
-  bool blown(real I) { return I > Imax; }
+  bool burned(real I) { return std::fabs(I) > Imax; }
 };
 
 struct Edge
@@ -85,7 +86,6 @@ struct Edge
 struct Circuit
 {
   std::vector<NodeId_t> nodes;
-  std::vector<std::size_t> node_level;
   std::vector<std::vector<NodeId_t>> levels;
   std::vector<std::vector<std::shared_ptr<Edge>>> adjacencies;
   std::vector<std::vector<std::shared_ptr<Edge>>> inputs;
@@ -94,7 +94,6 @@ struct Circuit
 
   Circuit(size_t n)
     : nodes(n)
-    , node_level(n)
     , levels()
     , adjacencies(n)
     , inputs(n)
@@ -108,12 +107,9 @@ struct Circuit
     return v - 1 - levels.at(1).size();
   }
 
-  NodeId_t actual_node(std::size_t i) const
-  {
-    return i + 1 + levels.at(1).size();
-  }
+  NodeId_t actual_node(size_t i) const { return i + 1 + levels.at(1).size(); }
 
-  std::size_t effective_node_count() const
+  size_t effective_node_count() const
   {
     return nodes.size() - 2 -
            (levels.at(1).size() + levels.at(levels.size() - 2).size());
@@ -122,7 +118,6 @@ struct Circuit
   void add_node(NodeId_t node, size_t level)
   {
     add_node_to_level(node, level);
-    node_level[node] = level;
     nodes[node] = node;
   }
 
@@ -142,8 +137,8 @@ struct Circuit
       admittance_matrix(src, dst) = 1 / edge.fuse.R;
 
     auto e = std::make_shared<Edge>(edge);
-    adjacencies[edge.src].push_back(e);
-    inputs[edge.dst].push_back(e);
+    adjacencies[src].push_back(e);
+    inputs[dst].push_back(e);
   }
 
   void remove_edge(NodeId_t src, NodeId_t dst)
@@ -209,32 +204,6 @@ struct Circuit
   {
     auto& adj = adjacencies[e->src];
     return std::find(begin(adj), end(adj), e) != end(adj);
-  }
-
-  Ohms edge_between(NodeId_t u, NodeId_t v) const
-  {
-    // auto R = admittance_matrix(u, v);
-    // if (R)
-    //   return R;
-    // return admittance_matrix(v, u);
-    auto e = find_edge(u, v);
-    if (e)
-      return e->fuse.R;
-    e = find_edge(v, u);
-    if (e)
-      return e->fuse.R;
-    return 0;
-  }
-
-  const Edge* find_edge(NodeId_t src, NodeId_t dst) const
-  {
-    auto& adj = adjacencies[src];
-    auto it = std::find_if(
-      begin(adj), end(adj), [&dst](auto& e) { return e->dst == dst; });
-    if (it != end(adj))
-      return it->get();
-    else
-      return nullptr;
   }
 };
 
@@ -458,7 +427,6 @@ calculate_ratios(const std::vector<std::shared_ptr<Edge>>& outputs)
 Amperes
 calculate_current(Circuit& g, real V)
 {
-  // Total current in circuit. Maybe improve this?
   const auto total_current = base_Imax * V;
 
   // Distribute the current evenly to the first level.
@@ -485,25 +453,23 @@ calculate_current(Circuit& g, real V)
 }
 
 void
-iteration(Circuit& g, real V)
+remove_burned(Circuit& g, real V)
 {
   for (auto p : g.nodes) {
     auto& adj = g.adjacencies[p];
     if (adj.empty())
       continue;
-    auto it = begin(adj);
 
-    while (it != end(adj)) {
+    for (auto it = begin(adj); it != end(adj);) {
       auto& e = *it;
-      if (e->fuse.blown(e->current)) {
-        // std::cout << "53rd" << e->src << " " << e->dst << "\n";
+      if (e->fuse.burned(e->current)) {
         g.remove_input_edge(e);
-        // std::cout << "and 3rd\n";
         it = adj.erase(it);
       } else {
         ++it;
       }
     }
+
     if (p != g.sink() && adj.empty()) {
       g.remove_node_inputs(p);
     }
@@ -550,6 +516,7 @@ draw_graph(const EdgeMap& em, const std::string& id = "begin")
     std::string label;
     std::string style;
     std::string head;
+
     if (!exists) {
       label = "";
       style = "dotted";
@@ -564,6 +531,7 @@ draw_graph(const EdgeMap& em, const std::string& id = "begin")
       style = "solid";
       head = "empty";
     }
+
     out << "    " << e.src << " -> " << e.dst << "[label=\"" << label
         // << e.src << "->" << e.dst
         << "\" "
@@ -573,33 +541,6 @@ draw_graph(const EdgeMap& em, const std::string& id = "begin")
   }
 
   out << "}\n";
-
-  // std::cout << "Graph printed: " << id << "\n";
-}
-
-void
-print_la(const std::pair<Matrix, Vector>& Ab)
-{
-  const auto& A = Ab.first;
-  const auto& b = Ab.second;
-  const auto m = A.rows();
-  const auto width = 9;
-  const auto precision = 4;
-
-  for (auto i = 0u; i < m; i++) {
-    for (auto j = 0u; j < m + 2; j++) {
-      std::cout << std::setw(width) << std::setprecision(precision);
-      if (j < m) {
-        std::cout << A(i, j);
-      } else if (j == m) {
-        std::cout << "X" << (i + 1);
-      } else if (j > m) {
-        std::cout << b(i);
-      }
-    }
-    std::cout << "\n";
-  }
-  std::cout << "\n";
 }
 
 void
@@ -643,8 +584,6 @@ init_kcl(Circuit& g)
 Amperes
 calculate_current_kcl(Circuit& g, real Vtotal)
 {
-  namespace e = Eigen;
-
   auto m = g.effective_node_count();
   const auto& M = g.admittance_matrix;
   auto fst = g.actual_node(0);
@@ -653,28 +592,22 @@ calculate_current_kcl(Circuit& g, real Vtotal)
   const auto& coefKCL = g.coefKCL;
 
   //------ Building independent term
-  auto size = g.levels[2].size();
-  // This is summing the voltages of the vertical wires as well, which is wrong
-  // Vector currentsKCL = Vector::Zero(m);
-  // currentsKCL.segment(0, size) =
-  //   (Vtotal * M).colwise().sum().segment(fst, size);
   Vector currentsKCL =
     (M.topRows(fst) * Vtotal).colwise().sum().segment(fst, m);
-  // std::cout << "Currents:\n" << currentsKCL.transpose() << "\n";
 
   //------ Removing zeroed rows and columns from coef matrix
-  e::Matrix<bool, 1, e::Dynamic> non_zero_cols =
+  Eigen::Matrix<bool, 1, Eigen::Dynamic> non_zero_cols =
     coefKCL.cast<bool>().colwise().any();
 
   Matrix A(non_zero_cols.count(), non_zero_cols.count());
-  std::vector<std::size_t> keep;
+  std::vector<size_t> keep;
   keep.reserve(coefKCL.rows());
 
-  for (e::Index u = 0, j = 0; u < coefKCL.cols(); u++) {
+  for (Eigen::Index u = 0, j = 0; u < coefKCL.cols(); u++) {
     if (!non_zero_cols(u))
       continue;
 
-    for (e::Index v = 0, i = 0; v < coefKCL.rows(); v++) {
+    for (Eigen::Index v = 0, i = 0; v < coefKCL.rows(); v++) {
       if (non_zero_cols(v)) {
         A(i, j) = coefKCL(v, u);
         i++;
@@ -697,48 +630,27 @@ calculate_current_kcl(Circuit& g, real Vtotal)
   Eigen::LLT<Eigen::Ref<Matrix>> solver(A);
   Vector VV = solver.solve(II);
 
+  //------Going back to a full vector of Voltages, including those
+  // nodes that were removed from VV because they weren't connected,
+  // and Vcc (with V = Vtotal) and Ground (V = 0).
+
+  // Everyone starts with zero
   Vector V = Vector::Zero(g.nodes.size());
+  // Those that represent Vcc get Vtotal
   V.segment(0, fst) = Vector::Constant(fst, Vtotal);
   {
+    // The rest get their voltage respective to the system solution
     Eigen::Index i = 0;
     for (auto x : keep)
       V(g.actual_node(x)) = VV(i++);
   }
 
-  for (auto node : g.nodes) {
-    for (auto& e : g.adjacencies[node]) {
-      auto I = e->fuse.R != 0 ? (V[node] - V[e->dst]) / e->fuse.R : 0;
-      e->current = I;
+  //------Calculating branch currents with Ohms law
+  for (auto& adj : g.adjacencies) {
+    for (auto& e : adj) {
+      e->current = e->fuse.R != 0 ? (V[e->src] - V[e->dst]) / e->fuse.R : 0;
     }
   }
-
-  // Vector V = Vector::Zero(m);
-  // {
-  //   Eigen::Index i = 0;
-  //   for (auto x : keep) {
-  //     V(x) = VV(i++);
-  //   }
-  // }
-
-  // //------ Calculating currents to branches connected to Vcc
-  // for (auto node : g.levels[2]) {
-  //   auto i = g.pseudo_node(node);
-  //   for (auto& e : g.inputs[node]) {
-  //     auto I = (Vtotal - V[i]) / e->fuse.R;
-  //     e->current = I;
-  //   }
-  // }
-
-  // // //------ Calculating output currents via Ohms law
-  // for (auto i = 0u; i < m; i++) {
-  //   auto node = g.actual_node(i);
-  //   for (auto& e : g.adjacencies[node]) {
-  //     auto j = g.pseudo_node(e->dst);
-  //     auto Vj = j < m ? V[j] : 0;
-  //     auto I = (V[i] - Vj) / e->fuse.R;
-  //     e->current = I;
-  //   }
-  // }
 
   verify_kcl(g, Vtotal);
 
@@ -758,23 +670,21 @@ Log
 simulation(size_t L, real D, real V0, real deltaV)
 {
   auto g = generate_circuit(L, D);
-  auto original = g;
-  draw_graph(diff_graph(original, g), "begin");
+  init_kcl(g);
+
   auto V = V0;
   auto l = Log();
   auto sink = g.nodes.size() - 1;
 
-  init_kcl(g);
+  auto original = g;
+  draw_graph(diff_graph(original, g), "begin");
 
   while (g.connected()) {
-    // std::cout << g.coefKCL << "\n\n";
-    // std::cout << V << "\n";
-    // print_la(kcl(g, V));
-    // calculate_current(g, V);
-    auto current = calculate_current_kcl(g, V);
-    l.log(V, current);
+    // auto current = calculate_current(g, V);
+    auto I = calculate_current_kcl(g, V);
+    l.log(V, I);
 
-    iteration(g, V);
+    remove_burned(g, V);
     V += deltaV;
   }
   l.log(V, 0);
@@ -814,15 +724,27 @@ main(int argc, char** argv)
       CurrentType = CircuitType::Tilted;
     else if (type == "h")
       CurrentType = CircuitType::Hexagon;
-    else
-      std::cout << "WARNING: Invalid circuit type\n";
+    else {
+      std::cout << "Invalid circuit type\n";
+      return 1;
+    }
   }
 
   seed_rand();
-  // auto start = now();
+  auto start = now();
   auto s = simulation(L, D, 0, 0.1);
-  // std::cout << s.iterations() << " iterations\n";
-  // std::cout << elapsed(start) << " ms\n";
+  auto& last = s.xy[s.xy.size() - 2];
+
+  printf("G: %c, L: %2zu, D: %2.1f, Iter: %5zu, Time: %4ldms, Vmax: %g\n",
+         CurrentType == CircuitType::Square
+           ? 's'
+           : CurrentType == CircuitType::Tilted ? 't' : 'h',
+         L,
+         D,
+         s.iterations(),
+         elapsed(start),
+         last.first);
+
   std::ofstream out{ "output.csv" };
   s.show(out);
 }
