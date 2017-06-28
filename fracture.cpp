@@ -306,10 +306,107 @@ generate_titled_circuit(size_t L, real D)
   return g;
 }
 
+size_t
+next_multiple(size_t L, double n)
+{
+  return std::ceil(L / n) * n;
+}
+
 Circuit
 generate_hexagon_circuit(size_t L, real D)
 {
-  return Circuit(L);
+  L = next_multiple(L, 4);
+  auto n = L * L + L / 2 + 2;
+  auto g = Circuit(n);
+
+  auto next = 0;
+  auto level = 0;
+  auto source = next++;
+
+  g.add_node(source, level++);
+
+  std::vector<NodeId_t> prev(L + 1, source);
+  std::vector<NodeId_t> curr(L + 1);
+
+  for (auto i = 0u; i < L / 4; i++) {
+    // Phase 1
+    for (auto j = 0u; j < L; j++) {
+      auto node = next++;
+      curr[j] = node;
+      g.add_node(node, level);
+
+      auto src = prev[j];
+      auto R = random_resist(D);
+      g.add_edge(Edge(src, node, Fuse(R, R)));
+    }
+    std::copy_n(begin(curr), L, begin(prev));
+    level++;
+
+    // Phase 2
+    for (auto j = 0u; j < L + 1; j++) {
+      auto node = next++;
+      curr[j] = node;
+      g.add_node(node, level);
+
+      auto x = j;
+      auto y = int(j) - 1;
+
+      if (x < L) {
+        auto R = random_resist(D);
+        g.add_edge(Edge(prev[x], node, Fuse(R, R)));
+      }
+      if (y >= 0) {
+        auto R = random_resist(D);
+        g.add_edge(Edge(prev[y], node, Fuse(R, R)));
+      }
+    }
+    std::copy_n(begin(curr), L + 1, begin(prev));
+    level++;
+
+    // Phase 3
+    for (auto j = 0u; j < L + 1; j++) {
+      auto node = next++;
+      curr[j] = node;
+      g.add_node(node, level);
+
+      auto src = prev[j];
+      auto R = random_resist(D);
+      g.add_edge(Edge(src, node, Fuse(R, R)));
+    }
+    std::copy_n(begin(curr), L + 1, begin(prev));
+    level++;
+
+    // Phase 4
+    for (auto j = 0u; j < L; j++) {
+      auto node = next++;
+      curr[j] = node;
+      g.add_node(node, level);
+
+      auto x = j;
+      auto y = j + 1;
+
+      {
+        auto R = random_resist(D);
+        g.add_edge(Edge(prev[x], node, Fuse(R, R)));
+      }
+      if (y < L + 1) {
+        auto R = random_resist(D);
+        g.add_edge(Edge(prev[y], node, Fuse(R, R)));
+      }
+    }
+    std::copy_n(begin(curr), L, begin(prev));
+    level++;
+  }
+
+  // Ground
+  auto sink = next++;
+  g.add_node(sink, level);
+  for (auto node : prev) {
+    auto R = random_resist(D);
+    g.add_edge(Edge(node, sink, Fuse(R, R)));
+  }
+
+  return g;
 }
 
 Circuit
