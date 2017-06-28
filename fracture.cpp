@@ -45,7 +45,11 @@ using Ohms = real;
 using Matrix = Eigen::MatrixXf;
 using Vector = Eigen::VectorXf;
 
-const real inf = 1e9;
+size_t
+next_multiple(size_t L, double n)
+{
+  return std::ceil(L / n) * n;
+}
 
 bool
 almost_equal(real a, real b, real eps = 1e-3)
@@ -102,18 +106,11 @@ struct Circuit
   {
   }
 
-  Eigen::Index pseudo_node(NodeId_t v) const
-  {
-    return v - 1 - levels.at(1).size();
-  }
+  Eigen::Index pseudo_node(NodeId_t v) const { return v - 1; }
 
-  NodeId_t actual_node(size_t i) const { return i + 1 + levels.at(1).size(); }
+  NodeId_t actual_node(size_t i) const { return i + 1; }
 
-  size_t effective_node_count() const
-  {
-    return nodes.size() - 2 -
-           (levels.at(1).size() + levels.at(levels.size() - 2).size());
-  }
+  size_t effective_node_count() const { return nodes.size() - 2; }
 
   void add_node(NodeId_t node, size_t level)
   {
@@ -245,9 +242,11 @@ random_resist(real D, Ohms R = base_resistance)
 }
 
 Circuit
-generate_titled_circuit(size_t L, real D)
+generate_tilted_circuit(size_t L, real D)
 {
-  auto total_nodes = 2 + (L / 2) * (L + L + 1) + L * (L % 2);
+  L = next_multiple(L, 2);
+
+  auto total_nodes = 2 + L * L + L / 2;
   auto g = Circuit(total_nodes);
   NodeId_t source = 0;
   auto level = 0;
@@ -255,61 +254,62 @@ generate_titled_circuit(size_t L, real D)
   level++;
 
   NodeId_t next = 1;
-  std::vector<NodeId_t> prev(L + 1);
+  std::vector<NodeId_t> prev(L + 1, source);
   std::vector<NodeId_t> curr(L + 1);
 
-  for (auto i = 0u; i < L; i++) {
-    prev[i] = next++;
-    g.add_node(prev[i], level);
-    g.add_edge(Edge(source, prev[i], Fuse(0, inf)));
-  }
-  level++;
+  for (auto i = 0u; i < L / 2; i++) {
+    // Phase 1
+    for (auto j = 0u; j < L; j++) {
+      auto x = j;
+      auto y = j + 1;
 
-  for (auto i = 1u; i < L; i++) {
-    auto n = L + (i % 2);
-    int max = L + (i % 2 ? 0 : 1);
+      auto node = next++;
+      curr[j] = node;
+      g.add_node(node, level);
 
-    for (auto j = 0u; j < n; j++) {
-      int nx, ny;
-      if (i % 2) {
-        nx = j - 1;
-        ny = j;
-      } else {
-        nx = j;
-        ny = j + 1;
-      }
-
-      curr[j] = next++;
-      g.add_node(curr[j], level);
-      if (nx >= 0) {
+      {
         auto R = random_resist(D);
-        g.add_edge(Edge(prev[nx], curr[j], Fuse(R, R)));
+        g.add_edge(Edge(prev[x], node, Fuse(R, R)));
       }
-      if (ny < max) {
+      if (y < L + 1 && prev[x] != prev[y]) {
         auto R = random_resist(D);
-        g.add_edge(Edge(prev[ny], curr[j], Fuse(R, R)));
+        g.add_edge(Edge(prev[y], node, Fuse(R, R)));
       }
     }
+    std::copy_n(begin(curr), L, begin(prev));
+    level++;
 
-    for (auto j = 0u; j < n; j++) {
-      prev[j] = curr[j];
+    // Phase 2
+    for (auto j = 0u; j < L + 1; j++) {
+      auto x = int(j) - 1;
+      auto y = j;
+
+      auto node = next++;
+      curr[j] = node;
+      g.add_node(node, level);
+
+      if (x >= 0) {
+        auto R = random_resist(D);
+        g.add_edge(Edge(prev[x], node, Fuse(R, R)));
+      }
+      if (y < L) {
+        auto R = random_resist(D);
+        g.add_edge(Edge(prev[y], node, Fuse(R, R)));
+      }
     }
+    std::copy_n(begin(curr), L + 1, begin(prev));
     level++;
   }
 
   NodeId_t sink = next;
   g.add_node(sink, level);
-  for (auto i = 0u; i < L + (L - 1) % 2; i++) {
-    g.add_edge(Edge(prev[i], sink, Fuse(0, inf)));
+
+  for (auto i = 0u; i < L + 1; i++) {
+    auto R = random_resist(D);
+    g.add_edge(Edge(prev[i], sink, Fuse(R, R)));
   }
 
   return g;
-}
-
-size_t
-next_multiple(size_t L, double n)
-{
-  return std::ceil(L / n) * n;
 }
 
 Circuit
@@ -419,6 +419,9 @@ generate_square_circuit(size_t L, real D)
   g.add_node(source, level);
   level++;
 
+  const auto vert = 10;
+  const auto horiz = 1;
+
   NodeId_t next = 1;
   std::vector<NodeId_t> prev(L);
   std::vector<NodeId_t> curr(L);
@@ -426,12 +429,10 @@ generate_square_circuit(size_t L, real D)
   for (auto i = 0u; i < L; i++) {
     prev[i] = next++;
     g.add_node(prev[i], level);
-    g.add_edge(Edge(source, prev[i], Fuse(0, inf)));
+    auto hR = random_resist(D);
+    g.add_edge(Edge(source, prev[i], Fuse(hR * horiz, hR)));
   }
   level++;
-
-  auto vert = 1;
-  auto horiz = 1;
 
   for (auto i = 1u; i < L; i++) {
     for (auto j = 0u; j < L; j++) {
@@ -454,7 +455,8 @@ generate_square_circuit(size_t L, real D)
   auto sink = next;
   g.add_node(sink, level);
   for (auto& v : prev) {
-    g.add_edge(Edge(v, sink, Fuse(0, inf)));
+    auto hR = random_resist(D);
+    g.add_edge(Edge(v, sink, Fuse(hR * horiz, hR)));
   }
 
   return g;
@@ -475,7 +477,7 @@ generate_circuit(size_t L, real D)
     case CircuitType::Square:
       return generate_square_circuit(L, D);
     case CircuitType::Tilted:
-      return generate_titled_circuit(L, D);
+      return generate_tilted_circuit(L, D);
     case CircuitType::Hexagon:
       return generate_hexagon_circuit(L, D);
     default:
@@ -526,9 +528,11 @@ calculate_current(Circuit& g, real V)
 {
   const auto total_current = base_Imax * V;
 
-  // Distribute the current evenly to the first level.
-  for (auto& out : g.adjacencies[0]) {
-    out->current = total_current / g.adjacencies[0].size();
+  {
+    auto ratios = calculate_ratios(g.adjacencies[0]);
+    for (auto i = 0u; i < g.adjacencies[0].size(); i++) {
+      g.adjacencies[0][i]->current = total_current * ratios[i];
+    }
   }
 
   for (auto lit = begin(g.levels) + 1; lit != end(g.levels); ++lit) {
@@ -745,7 +749,7 @@ calculate_current_kcl(Circuit& g, real Vtotal)
   //------Calculating branch currents with Ohms law
   for (auto& adj : g.adjacencies) {
     for (auto& e : adj) {
-      e->current = e->fuse.R != 0 ? (V[e->src] - V[e->dst]) / e->fuse.R : 0;
+      e->current = (V[e->src] - V[e->dst]) / e->fuse.R;
     }
   }
 
@@ -754,10 +758,8 @@ calculate_current_kcl(Circuit& g, real Vtotal)
   //------ Calculating final current
   auto total_current = Amperes(0);
 
-  for (auto node : g.levels[g.levels.size() - 3]) {
-    for (auto& e : g.adjacencies[node]) {
-      total_current += e->current;
-    }
+  for (auto& e : g.inputs[g.sink()]) {
+    total_current += e->current;
   }
 
   return total_current;
@@ -771,13 +773,12 @@ simulation(size_t L, real D, real V0, real deltaV)
 
   auto V = V0;
   auto l = Log();
-  auto sink = g.nodes.size() - 1;
 
   auto original = g;
   draw_graph(diff_graph(original, g), "begin");
 
   while (g.connected()) {
-    // auto current = calculate_current(g, V);
+    // auto I = calculate_current(g, V);
     auto I = calculate_current_kcl(g, V);
     l.log(V, I);
 
