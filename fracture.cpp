@@ -244,9 +244,14 @@ random_resist(real D, Ohms R = base_resistance)
 Circuit
 generate_tilted_circuit(size_t L, real D)
 {
-  L = next_multiple(L, 2);
+  auto total_nodes = 2 + (2 * L + 1) * (L / 2);
 
-  auto total_nodes = 2 + L * L + L / 2;
+  auto LL = (L / 2) * 2;
+  auto diff = L - LL;
+  if (diff == 1) {
+    total_nodes += L;
+  }
+
   auto g = Circuit(total_nodes);
   NodeId_t source = 0;
   auto level = 0;
@@ -256,55 +261,61 @@ generate_tilted_circuit(size_t L, real D)
   NodeId_t next = 1;
   std::vector<NodeId_t> prev(L + 1, source);
   std::vector<NodeId_t> curr(L + 1);
+  auto last_count = 1;
 
-  for (auto i = 0u; i < L / 2; i++) {
+  for (auto i = 0u; i < L; i++) {
     // Phase 1
-    for (auto j = 0u; j < L; j++) {
-      auto x = j;
-      auto y = j + 1;
+    if (i % 2 == 0) {
+      for (auto j = 0u; j < L; j++) {
+        auto x = j;
+        auto y = j + 1;
 
-      auto node = next++;
-      curr[j] = node;
-      g.add_node(node, level);
+        auto node = next++;
+        curr[j] = node;
+        g.add_node(node, level);
 
-      {
-        auto R = random_resist(D);
-        g.add_edge(Edge(prev[x], node, Fuse(R, R)));
+        {
+          auto R = random_resist(D);
+          g.add_edge(Edge(prev[x], node, Fuse(R, R)));
+        }
+        if (y < L + 1 && prev[x] != prev[y]) {
+          auto R = random_resist(D);
+          g.add_edge(Edge(prev[y], node, Fuse(R, R)));
+        }
       }
-      if (y < L + 1 && prev[x] != prev[y]) {
-        auto R = random_resist(D);
-        g.add_edge(Edge(prev[y], node, Fuse(R, R)));
-      }
+      last_count = L;
     }
-    std::copy_n(begin(curr), L, begin(prev));
-    level++;
 
     // Phase 2
-    for (auto j = 0u; j < L + 1; j++) {
-      auto x = int(j) - 1;
-      auto y = j;
+    else if (i % 2 == 1) {
+      for (auto j = 0u; j < L + 1; j++) {
+        auto x = int(j) - 1;
+        auto y = j;
 
-      auto node = next++;
-      curr[j] = node;
-      g.add_node(node, level);
+        auto node = next++;
+        curr[j] = node;
+        g.add_node(node, level);
 
-      if (x >= 0) {
-        auto R = random_resist(D);
-        g.add_edge(Edge(prev[x], node, Fuse(R, R)));
+        if (x >= 0) {
+          auto R = random_resist(D);
+          g.add_edge(Edge(prev[x], node, Fuse(R, R)));
+        }
+        if (y < L) {
+          auto R = random_resist(D);
+          g.add_edge(Edge(prev[y], node, Fuse(R, R)));
+        }
       }
-      if (y < L) {
-        auto R = random_resist(D);
-        g.add_edge(Edge(prev[y], node, Fuse(R, R)));
-      }
+      last_count = L + 1;
     }
-    std::copy_n(begin(curr), L + 1, begin(prev));
+
+    std::copy_n(begin(curr), last_count, begin(prev));
     level++;
   }
 
   NodeId_t sink = next;
   g.add_node(sink, level);
 
-  for (auto i = 0u; i < L + 1; i++) {
+  for (auto i = 0u; i < last_count; i++) {
     auto R = random_resist(D);
     g.add_edge(Edge(prev[i], sink, Fuse(R, R)));
   }
@@ -315,8 +326,19 @@ generate_tilted_circuit(size_t L, real D)
 Circuit
 generate_hexagon_circuit(size_t L, real D)
 {
-  L = next_multiple(L, 4);
-  auto n = L * L + L / 2 + 2;
+  auto n = 2 + (L / 4) * (4 * L + 2);
+
+  auto diff = L - (4 * (L / 4));
+  if (diff > 0) {
+    n += L;
+  }
+  if (diff > 1) {
+    n += L + 1;
+  }
+  if (diff > 2) {
+    n += L + 1;
+  }
+
   auto g = Circuit(n);
 
   auto next = 0;
@@ -328,82 +350,91 @@ generate_hexagon_circuit(size_t L, real D)
   std::vector<NodeId_t> prev(L + 1, source);
   std::vector<NodeId_t> curr(L + 1);
 
-  for (auto i = 0u; i < L / 4; i++) {
-    // Phase 1
-    for (auto j = 0u; j < L; j++) {
-      auto node = next++;
-      curr[j] = node;
-      g.add_node(node, level);
+  auto last_count = 1;
 
-      auto src = prev[j];
-      auto R = random_resist(D);
-      g.add_edge(Edge(src, node, Fuse(R, R)));
+  for (auto i = 0u; i < L; i++) {
+    // Phase 1
+    if (i % 4 == 0) {
+      for (auto j = 0u; j < L; j++) {
+        auto node = next++;
+        curr[j] = node;
+        g.add_node(node, level);
+
+        auto src = prev[j];
+        auto R = random_resist(D);
+        g.add_edge(Edge(src, node, Fuse(R, R)));
+      }
+      last_count = L;
     }
-    std::copy_n(begin(curr), L, begin(prev));
-    level++;
 
     // Phase 2
-    for (auto j = 0u; j < L + 1; j++) {
-      auto node = next++;
-      curr[j] = node;
-      g.add_node(node, level);
+    if (i % 4 == 1) {
+      for (auto j = 0u; j < L + 1; j++) {
+        auto node = next++;
+        curr[j] = node;
+        g.add_node(node, level);
 
-      auto x = j;
-      auto y = int(j) - 1;
+        auto x = j;
+        auto y = int(j) - 1;
 
-      if (x < L) {
-        auto R = random_resist(D);
-        g.add_edge(Edge(prev[x], node, Fuse(R, R)));
+        if (x < L) {
+          auto R = random_resist(D);
+          g.add_edge(Edge(prev[x], node, Fuse(R, R)));
+        }
+        if (y >= 0) {
+          auto R = random_resist(D);
+          g.add_edge(Edge(prev[y], node, Fuse(R, R)));
+        }
       }
-      if (y >= 0) {
-        auto R = random_resist(D);
-        g.add_edge(Edge(prev[y], node, Fuse(R, R)));
-      }
+      last_count = L + 1;
     }
-    std::copy_n(begin(curr), L + 1, begin(prev));
-    level++;
 
     // Phase 3
-    for (auto j = 0u; j < L + 1; j++) {
-      auto node = next++;
-      curr[j] = node;
-      g.add_node(node, level);
+    if (i % 4 == 2) {
+      for (auto j = 0u; j < L + 1; j++) {
+        auto node = next++;
+        curr[j] = node;
+        g.add_node(node, level);
 
-      auto src = prev[j];
-      auto R = random_resist(D);
-      g.add_edge(Edge(src, node, Fuse(R, R)));
+        auto src = prev[j];
+        auto R = random_resist(D);
+        g.add_edge(Edge(src, node, Fuse(R, R)));
+      }
+      last_count = L + 1;
     }
-    std::copy_n(begin(curr), L + 1, begin(prev));
-    level++;
 
     // Phase 4
-    for (auto j = 0u; j < L; j++) {
-      auto node = next++;
-      curr[j] = node;
-      g.add_node(node, level);
+    if (i % 4 == 3) {
+      for (auto j = 0u; j < L; j++) {
+        auto node = next++;
+        curr[j] = node;
+        g.add_node(node, level);
 
-      auto x = j;
-      auto y = j + 1;
+        auto x = j;
+        auto y = j + 1;
 
-      {
-        auto R = random_resist(D);
-        g.add_edge(Edge(prev[x], node, Fuse(R, R)));
+        {
+          auto R = random_resist(D);
+          g.add_edge(Edge(prev[x], node, Fuse(R, R)));
+        }
+        if (y < L + 1) {
+          auto R = random_resist(D);
+          g.add_edge(Edge(prev[y], node, Fuse(R, R)));
+        }
       }
-      if (y < L + 1) {
-        auto R = random_resist(D);
-        g.add_edge(Edge(prev[y], node, Fuse(R, R)));
-      }
+      last_count = L;
     }
-    std::copy_n(begin(curr), L, begin(prev));
+
+    std::copy_n(begin(curr), last_count, begin(prev));
     level++;
   }
 
   // Ground
   auto sink = next++;
   g.add_node(sink, level);
-  for (auto node : prev) {
+  for (auto i = 0u; i < last_count; i++) {
     auto R = random_resist(D);
-    g.add_edge(Edge(node, sink, Fuse(R, R)));
+    g.add_edge(Edge(prev[i], sink, Fuse(R, R)));
   }
 
   return g;
@@ -419,22 +450,14 @@ generate_square_circuit(size_t L, real D)
   g.add_node(source, level);
   level++;
 
-  const auto vert = 10;
-  const auto horiz = 1;
+  const auto vert = 1.0;
+  const auto horiz = 0.1;
 
   NodeId_t next = 1;
-  std::vector<NodeId_t> prev(L);
+  std::vector<NodeId_t> prev(L, source);
   std::vector<NodeId_t> curr(L);
 
   for (auto i = 0u; i < L; i++) {
-    prev[i] = next++;
-    g.add_node(prev[i], level);
-    auto hR = random_resist(D);
-    g.add_edge(Edge(source, prev[i], Fuse(hR * horiz, hR)));
-  }
-  level++;
-
-  for (auto i = 1u; i < L; i++) {
     for (auto j = 0u; j < L; j++) {
       curr[j] = next++;
       g.add_node(curr[j], level);
@@ -446,9 +469,7 @@ generate_square_circuit(size_t L, real D)
         g.add_edge(Edge(curr[j - 1], curr[j], Fuse(vR * vert, vR)));
       }
     }
-    for (auto j = 0u; j < L; j++) {
-      prev[j] = curr[j];
-    }
+    std::copy_n(begin(curr), L, begin(prev));
     level++;
   }
 
@@ -506,18 +527,14 @@ std::vector<real>
 calculate_ratios(const std::vector<std::shared_ptr<Edge>>& outputs)
 {
   std::vector<real> ratios(outputs.size());
-  if (ratios.size() == 1) {
-    ratios[0] = 1;
-    return ratios;
-  }
-
   Ohms total(0.0);
+
   for (auto& e : outputs) {
-    total += e->fuse.R;
+    total += 1 / e->fuse.R;
   }
 
   for (auto i = 0u; i < ratios.size(); i++) {
-    ratios[i] = (total - outputs[i]->fuse.R) / total;
+    ratios[i] = (1 / outputs[i]->fuse.R) / total;
   }
 
   return ratios;
@@ -529,9 +546,11 @@ calculate_current(Circuit& g, real V)
   const auto total_current = base_Imax * V;
 
   {
-    auto ratios = calculate_ratios(g.adjacencies[0]);
-    for (auto i = 0u; i < g.adjacencies[0].size(); i++) {
-      g.adjacencies[0][i]->current = total_current * ratios[i];
+    auto& level1 = g.adjacencies[0];
+    auto ratios = calculate_ratios(level1);
+
+    for (auto i = 0u; i < level1.size(); i++) {
+      level1[i]->current = total_current * ratios[i];
     }
   }
 
@@ -778,8 +797,8 @@ simulation(size_t L, real D, real V0, real deltaV)
   draw_graph(diff_graph(original, g), "begin");
 
   while (g.connected()) {
-    // auto I = calculate_current(g, V);
-    auto I = calculate_current_kcl(g, V);
+    auto I = calculate_current(g, V);
+    // auto I = calculate_current_kcl(g, V);
     l.log(V, I);
 
     remove_burned(g, V);
