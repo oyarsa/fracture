@@ -776,10 +776,8 @@ calculate_current_kcl(Circuit& g, real Vtotal)
 
   //------ Calculating final current
   auto total_current = Amperes(0);
-
-  for (auto& e : g.inputs[g.sink()]) {
+  for (auto& e : g.adjacencies[g.source()])
     total_current += e->current;
-  }
 
   return total_current;
 }
@@ -797,8 +795,8 @@ simulation(size_t L, real D, real V0, real deltaV)
   draw_graph(diff_graph(original, g), "begin");
 
   while (g.connected()) {
-    auto I = calculate_current(g, V);
-    // auto I = calculate_current_kcl(g, V);
+    // auto I = calculate_current(g, V);
+    auto I = calculate_current_kcl(g, V);
     l.log(V, I);
 
     remove_burned(g, V);
