@@ -66,6 +66,7 @@ if sys.platform == 'win32':
 exe = os.path.join('out', exename)
 
 print_graph = False
+plt.style.use('ggplot')
 
 args = opt.parse_args();
 
@@ -92,7 +93,8 @@ for G in args.geometry:
             result_path = os.path.join(datafolder, f'{L}.{G}.{D}.csv')
             os.replace(results, result_path)
 
-            out = np.genfromtxt(result_path, delimiter=',', skip_header=1, names=['V', 'I'])
+            out = np.genfromtxt(result_path, delimiter=',',
+                                skip_header=1, names=['V', 'I'])
             plt.plot(out['V'], out['I'], label=f'D={int(D*100)}%')
 
         plt.legend(loc='upper left')
