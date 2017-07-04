@@ -2,7 +2,6 @@
 
 if not exist ".\out\" mkdir .\out\
 
-  rem mkl_intel_lp64.lib mkl_sequential.lib mkl_core.lib^
 cl fracture.cpp^
   mkl_intel_lp64.lib mkl_intel_thread.lib mkl_core.lib libiomp5md.lib^
   -Ox -arch:AVX2 -fp:fast -GL^
