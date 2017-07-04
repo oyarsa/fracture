@@ -45,12 +45,6 @@ using Ohms = real;
 using Matrix = Eigen::MatrixXf;
 using Vector = Eigen::VectorXf;
 
-size_t
-next_multiple(size_t L, double n)
-{
-  return std::ceil(L / n) * n;
-}
-
 bool
 almost_equal(real a, real b, real eps = 1e-3)
 {
@@ -59,8 +53,8 @@ almost_equal(real a, real b, real eps = 1e-3)
 
 struct Fuse
 {
-  Ohms R;
-  Amperes Imax;
+  const Ohms R;
+  const Amperes Imax;
 
   Fuse(real R, real Imax)
     : R(R)
@@ -68,14 +62,14 @@ struct Fuse
   {
   }
 
-  bool burned(real I) { return std::fabs(I) > Imax; }
+  bool burned(real I) const { return std::fabs(I) > Imax; }
 };
 
 struct Edge
 {
-  NodeId_t src;
-  NodeId_t dst;
-  Fuse fuse;
+  const NodeId_t src;
+  const NodeId_t dst;
+  const Fuse fuse;
   Amperes current;
 
   Edge(NodeId_t src, NodeId_t dst, Fuse fuse)
@@ -110,7 +104,9 @@ struct Circuit
 
   NodeId_t actual_node(size_t i) const { return i + 1; }
 
-  size_t effective_node_count() const { return nodes.size() - 2; }
+  size_t node_count() const { return nodes.size(); }
+
+  size_t effective_node_count() const { return node_count() - 2; }
 
   void add_node(NodeId_t node, size_t level)
   {
@@ -195,7 +191,7 @@ struct Circuit
 
   NodeId_t sink() const { return nodes.back(); }
 
-  bool connected() { return adjacencies[source()].size() > 0; }
+  bool connected() const { return adjacencies[source()].size() > 0; }
 
   bool contains(const std::shared_ptr<Edge>& e) const
   {
@@ -228,9 +224,9 @@ nextreal()
   return nextrand() / real(UINT64_MAX);
 }
 
-auto k_base = real{ 10 };
-auto base_resistance = Ohms{ k_base };
-auto base_Imax = Amperes{ k_base };
+constexpr auto k_base = real{ 10 };
+constexpr auto base_resistance = Ohms{ k_base };
+constexpr auto base_Imax = Amperes{ k_base };
 
 Ohms
 random_resist(real D, Ohms R = base_resistance)
@@ -244,16 +240,18 @@ random_resist(real D, Ohms R = base_resistance)
 Circuit
 generate_tilted_circuit(size_t L, real D)
 {
-  auto total_nodes = 2 + (2 * L + 1) * (L / 2);
-
-  auto LL = (L / 2) * 2;
-  auto diff = L - LL;
-  if (diff == 1) {
-    total_nodes += L;
-  }
+  const auto total_nodes = [&] {
+    auto total = 2 + (2 * L + 1) * (L / 2);
+    const auto LL = (L / 2) * 2;
+    const auto diff = L - LL;
+    if (diff == 1) {
+      total += L;
+    }
+    return total;
+  }();
 
   auto g = Circuit(total_nodes);
-  NodeId_t source = 0;
+  const NodeId_t source = 0;
   auto level = 0;
   g.add_node(source, level);
   level++;
@@ -267,19 +265,19 @@ generate_tilted_circuit(size_t L, real D)
     // Phase 1
     if (i % 2 == 0) {
       for (auto j = 0u; j < L; j++) {
-        auto x = j;
-        auto y = j + 1;
+        const auto x = j;
+        const auto y = j + 1;
 
-        auto node = next++;
+        const auto node = next++;
         curr[j] = node;
         g.add_node(node, level);
 
         {
-          auto R = random_resist(D);
+          const auto R = random_resist(D);
           g.add_edge(Edge(prev[x], node, Fuse(R, R)));
         }
         if (y < L + 1 && prev[x] != prev[y]) {
-          auto R = random_resist(D);
+          const auto R = random_resist(D);
           g.add_edge(Edge(prev[y], node, Fuse(R, R)));
         }
       }
@@ -289,19 +287,19 @@ generate_tilted_circuit(size_t L, real D)
     // Phase 2
     else if (i % 2 == 1) {
       for (auto j = 0u; j < L + 1; j++) {
-        auto x = int(j) - 1;
-        auto y = j;
+        const auto x = int(j) - 1;
+        const auto y = j;
 
-        auto node = next++;
+        const auto node = next++;
         curr[j] = node;
         g.add_node(node, level);
 
         if (x >= 0) {
-          auto R = random_resist(D);
+          const auto R = random_resist(D);
           g.add_edge(Edge(prev[x], node, Fuse(R, R)));
         }
         if (y < L) {
-          auto R = random_resist(D);
+          const auto R = random_resist(D);
           g.add_edge(Edge(prev[y], node, Fuse(R, R)));
         }
       }
@@ -312,7 +310,7 @@ generate_tilted_circuit(size_t L, real D)
     level++;
   }
 
-  NodeId_t sink = next;
+  const auto sink = next;
   g.add_node(sink, level);
 
   for (auto i = 0u; i < last_count; i++) {
@@ -326,24 +324,27 @@ generate_tilted_circuit(size_t L, real D)
 Circuit
 generate_hexagon_circuit(size_t L, real D)
 {
-  auto n = 2 + (L / 4) * (4 * L + 2);
+  const auto n = [&] {
+    auto x = 2 + (L / 4) * (4 * L + 2);
 
-  auto diff = L - (4 * (L / 4));
-  if (diff > 0) {
-    n += L;
-  }
-  if (diff > 1) {
-    n += L + 1;
-  }
-  if (diff > 2) {
-    n += L + 1;
-  }
+    const auto diff = L - (4 * (L / 4));
+    if (diff > 0) {
+      x += L;
+    }
+    if (diff > 1) {
+      x += L + 1;
+    }
+    if (diff > 2) {
+      x += L + 1;
+    }
+    return x;
+  }();
 
   auto g = Circuit(n);
 
   auto next = 0;
   auto level = 0;
-  auto source = next++;
+  const auto source = next++;
 
   g.add_node(source, level++);
 
@@ -356,12 +357,12 @@ generate_hexagon_circuit(size_t L, real D)
     // Phase 1
     if (i % 4 == 0) {
       for (auto j = 0u; j < L; j++) {
-        auto node = next++;
+        const auto node = next++;
         curr[j] = node;
         g.add_node(node, level);
 
-        auto src = prev[j];
-        auto R = random_resist(D);
+        const auto src = prev[j];
+        const auto R = random_resist(D);
         g.add_edge(Edge(src, node, Fuse(R, R)));
       }
       last_count = L;
@@ -370,19 +371,19 @@ generate_hexagon_circuit(size_t L, real D)
     // Phase 2
     if (i % 4 == 1) {
       for (auto j = 0u; j < L + 1; j++) {
-        auto node = next++;
+        const auto node = next++;
         curr[j] = node;
         g.add_node(node, level);
 
-        auto x = j;
-        auto y = int(j) - 1;
+        const auto x = j;
+        const auto y = int(j) - 1;
 
         if (x < L) {
-          auto R = random_resist(D);
+          const auto R = random_resist(D);
           g.add_edge(Edge(prev[x], node, Fuse(R, R)));
         }
         if (y >= 0) {
-          auto R = random_resist(D);
+          const auto R = random_resist(D);
           g.add_edge(Edge(prev[y], node, Fuse(R, R)));
         }
       }
@@ -392,12 +393,12 @@ generate_hexagon_circuit(size_t L, real D)
     // Phase 3
     if (i % 4 == 2) {
       for (auto j = 0u; j < L + 1; j++) {
-        auto node = next++;
+        const auto node = next++;
         curr[j] = node;
         g.add_node(node, level);
 
-        auto src = prev[j];
-        auto R = random_resist(D);
+        const auto src = prev[j];
+        const auto R = random_resist(D);
         g.add_edge(Edge(src, node, Fuse(R, R)));
       }
       last_count = L + 1;
@@ -406,19 +407,19 @@ generate_hexagon_circuit(size_t L, real D)
     // Phase 4
     if (i % 4 == 3) {
       for (auto j = 0u; j < L; j++) {
-        auto node = next++;
+        const auto node = next++;
         curr[j] = node;
         g.add_node(node, level);
 
-        auto x = j;
-        auto y = j + 1;
+        const auto x = j;
+        const auto y = j + 1;
 
         {
-          auto R = random_resist(D);
+          const auto R = random_resist(D);
           g.add_edge(Edge(prev[x], node, Fuse(R, R)));
         }
         if (y < L + 1) {
-          auto R = random_resist(D);
+          const auto R = random_resist(D);
           g.add_edge(Edge(prev[y], node, Fuse(R, R)));
         }
       }
@@ -430,10 +431,10 @@ generate_hexagon_circuit(size_t L, real D)
   }
 
   // Ground
-  auto sink = next++;
+  const auto sink = next++;
   g.add_node(sink, level);
   for (auto i = 0u; i < last_count; i++) {
-    auto R = random_resist(D);
+    const auto R = random_resist(D);
     g.add_edge(Edge(prev[i], sink, Fuse(R, R)));
   }
 
@@ -443,9 +444,9 @@ generate_hexagon_circuit(size_t L, real D)
 Circuit
 generate_square_circuit(size_t L, real D)
 {
-  auto total_nodes = L * L + 2;
+  const auto total_nodes = L * L + 2;
   auto g = Circuit(total_nodes);
-  auto source = NodeId_t{ 0 };
+  const auto source = NodeId_t{ 0 };
   auto level = 0;
   g.add_node(source, level);
   level++;
@@ -462,10 +463,10 @@ generate_square_circuit(size_t L, real D)
       curr[j] = next++;
       g.add_node(curr[j], level);
 
-      auto hR = random_resist(D);
+      const auto hR = random_resist(D);
       g.add_edge(Edge(prev[j], curr[j], Fuse(hR * horiz, hR)));
       if (j > 0) {
-        auto vR = random_resist(D);
+        const auto vR = random_resist(D);
         g.add_edge(Edge(curr[j - 1], curr[j], Fuse(vR * vert, vR)));
       }
     }
@@ -473,10 +474,10 @@ generate_square_circuit(size_t L, real D)
     level++;
   }
 
-  auto sink = next;
+  const auto sink = next;
   g.add_node(sink, level);
   for (auto& v : prev) {
-    auto hR = random_resist(D);
+    const auto hR = random_resist(D);
     g.add_edge(Edge(v, sink, Fuse(hR * horiz, hR)));
   }
 
@@ -489,12 +490,11 @@ enum class CircuitType
   Tilted,
   Hexagon
 };
-auto CurrentType = CircuitType::Tilted;
 
 Circuit
-generate_circuit(size_t L, real D)
+generate_circuit(size_t L, real D, CircuitType type)
 {
-  switch (CurrentType) {
+  switch (type) {
     case CircuitType::Square:
       return generate_square_circuit(L, D);
     case CircuitType::Tilted:
@@ -514,7 +514,7 @@ struct Log
 
   size_t iterations() const { return xy.size(); }
 
-  void show(std::ostream& out = std::cout)
+  void show(std::ostream& out = std::cout) const
   {
     out << "V,I\n";
     for (auto& p : xy) {
@@ -547,7 +547,7 @@ calculate_current(Circuit& g, real V)
 
   {
     auto& level1 = g.adjacencies[0];
-    auto ratios = calculate_ratios(level1);
+    const auto ratios = calculate_ratios(level1);
 
     for (auto i = 0u; i < level1.size(); i++) {
       level1[i]->current = total_current * ratios[i];
@@ -562,7 +562,7 @@ calculate_current(Circuit& g, real V)
       }
 
       auto& adj = g.adjacencies[p];
-      auto ratios = calculate_ratios(adj);
+      const auto ratios = calculate_ratios(adj);
       for (auto i = 0u; i < adj.size(); i++) {
         adj[i]->current = current * ratios[i];
       }
@@ -575,13 +575,13 @@ calculate_current(Circuit& g, real V)
 void
 remove_burned(Circuit& g, real V)
 {
-  for (auto p : g.nodes) {
+  for (const auto p : g.nodes) {
     auto& adj = g.adjacencies[p];
     if (adj.empty())
       continue;
 
     for (auto it = begin(adj); it != end(adj);) {
-      auto& e = *it;
+      const auto& e = *it;
       if (e->fuse.burned(e->current)) {
         g.remove_input_edge(e);
         it = adj.erase(it);
@@ -629,10 +629,10 @@ draw_graph(const EdgeMap& em, const std::string& id = "begin")
   out << "  node [height=0.05 label=\"\" shape=point width=0.05]\n";
   out << "  edge [arrowsize=0.5 fontsize=8]\n";
 
-  for (auto& p : em) {
-    auto& e = p.first;
-    auto exists = p.second;
-    auto& f = e.fuse;
+  for (const auto& p : em) {
+    const auto& e = p.first;
+    const auto exists = p.second;
+    const auto& f = e.fuse;
     std::string label;
     std::string style;
     std::string head;
@@ -666,10 +666,10 @@ draw_graph(const EdgeMap& em, const std::string& id = "begin")
 void
 verify_kcl(Circuit& g, real Vtotal)
 {
-  auto m = g.effective_node_count();
+  const auto m = g.effective_node_count();
 
   for (auto i = 0u; i < m; i++) {
-    auto node = g.actual_node(i);
+    const auto node = g.actual_node(i);
 
     auto in = 0.0;
     for (auto& e : g.inputs[node])
@@ -691,9 +691,9 @@ verify_kcl(Circuit& g, real Vtotal)
 void
 init_kcl(Circuit& g)
 {
-  auto m = g.effective_node_count();
-  auto& M = g.admittance_matrix;
-  auto fst = g.actual_node(0);
+  const auto m = g.effective_node_count();
+  const auto& M = g.admittance_matrix;
+  const auto fst = g.actual_node(0);
 
   //------ Building coefficient matrix
   g.coefKCL = -(M + M.transpose()).block(fst, fst, m, m);
@@ -704,9 +704,9 @@ init_kcl(Circuit& g)
 Amperes
 calculate_current_kcl(Circuit& g, real Vtotal)
 {
-  auto m = g.effective_node_count();
+  const auto m = g.effective_node_count();
   const auto& M = g.admittance_matrix;
-  auto fst = g.actual_node(0);
+  const auto fst = g.actual_node(0);
 
   // Coefficient matrix
   const auto& coefKCL = g.coefKCL;
@@ -716,7 +716,7 @@ calculate_current_kcl(Circuit& g, real Vtotal)
     (M.topRows(fst) * Vtotal).colwise().sum().segment(fst, m);
 
   //------ Removing zeroed rows and columns from coef matrix
-  Eigen::Matrix<bool, 1, Eigen::Dynamic> non_zero_cols =
+  const Eigen::Matrix<bool, 1, Eigen::Dynamic> non_zero_cols =
     coefKCL.cast<bool>().colwise().any();
 
   Matrix A(non_zero_cols.count(), non_zero_cols.count());
@@ -748,14 +748,14 @@ calculate_current_kcl(Circuit& g, real Vtotal)
 
   //------ Solving the system
   Eigen::LLT<Eigen::Ref<Matrix>> solver(A);
-  Vector VV = solver.solve(II);
+  const Vector VV = solver.solve(II);
 
   //------Going back to a full vector of Voltages, including those
   // nodes that were removed from VV because they weren't connected,
   // and Vcc (with V = Vtotal) and Ground (V = 0).
 
   // Everyone starts with zero
-  Vector V = Vector::Zero(g.nodes.size());
+  Vector V = Vector::Zero(g.node_count());
   // Those that represent Vcc get Vtotal
   V.segment(0, fst) = Vector::Constant(fst, Vtotal);
   {
@@ -783,15 +783,15 @@ calculate_current_kcl(Circuit& g, real Vtotal)
 }
 
 Log
-simulation(size_t L, real D, real V0, real deltaV)
+simulation(size_t L, real D, CircuitType G, real V0, real deltaV)
 {
-  auto g = generate_circuit(L, D);
+  auto g = generate_circuit(L, D, G);
   init_kcl(g);
 
   auto V = V0;
   auto l = Log();
 
-  auto original = g;
+  const auto original = g;
   draw_graph(diff_graph(original, g), "begin");
 
   while (g.connected()) {
@@ -826,6 +826,7 @@ main(int argc, char** argv)
 {
   size_t L = 14;
   real D = 1;
+  CircuitType G = CircuitType::Tilted;
 
   if (argc >= 3) {
     L = std::stoul(argv[1]);
@@ -834,11 +835,11 @@ main(int argc, char** argv)
   if (argc >= 4) {
     auto type = std::string{ argv[3] };
     if (type == "s")
-      CurrentType = CircuitType::Square;
+      G = CircuitType::Square;
     else if (type == "t")
-      CurrentType = CircuitType::Tilted;
+      G = CircuitType::Tilted;
     else if (type == "h")
-      CurrentType = CircuitType::Hexagon;
+      G = CircuitType::Hexagon;
     else {
       std::cout << "Invalid circuit type\n";
       return 1;
@@ -846,14 +847,12 @@ main(int argc, char** argv)
   }
 
   seed_rand();
-  auto start = now();
-  auto s = simulation(L, D, 0, 0.1);
-  auto& last = s.xy[s.xy.size() - 2];
+  const auto start = now();
+  const auto s = simulation(L, D, G, 0, 0.1);
+  const auto& last = s.xy[s.xy.size() - 2];
 
   printf("G: %c, L: %2zu, D: %2.1f, Iter: %5zu, Time: %4ldms, Vmax: %g\n",
-         CurrentType == CircuitType::Square
-           ? 's'
-           : CurrentType == CircuitType::Tilted ? 't' : 'h',
+         G == CircuitType::Square ? 's' : G == CircuitType::Tilted ? 't' : 'h',
          L,
          D,
          s.iterations(),
