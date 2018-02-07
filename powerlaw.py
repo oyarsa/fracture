@@ -14,24 +14,28 @@ opt.add_argument(
     type=str
 )
 
-opt.add_argument(
-    '-l', '--length',
-    type=int
-)
-
 def fit(data, alfa, beta, L):
     V = data['V']
     I = data['I']
 
-    vlb = V * (L**-beta)
-    ilb = I * (L**-alfa)
+    vlb = V / (L**beta)
+    ilb = I / (L**alfa)
 
     return ilb, vlb
 
 
+def sort_files(path):
+    filename = os.path.basename(path)
+    length = filename.split('.')[0]
+    return int(length)
+
+
 args = opt.parse_args()
+files = sorted(glob.glob(args.source + "/*.csv"), key=sort_files)
+print('\n'.join(files))
+sizes = [7, 14, 20, 28]
 data = [np.genfromtxt(path, delimiter=',', skip_header=1, names=['V', 'I'])
-        for path in glob.glob(args.source + "/*.csv")]
+        for path in files]
 
 while True:
     try:
@@ -39,10 +43,15 @@ while True:
         beta = float(input('beta: '))
     except ValueError:
         break
-    fitresult = [(args.length, fit(d, alfa, beta, args.length)) for d in data]
+    fitresult = [(L, fit(d, alfa, beta, L)) for L, d in zip(sizes, data)]
 
-    for l, (ilb, vlb) in fitresult:
-        plt.plot(vlb, ilb, label=f'L = {l}')
+    for L, (ilb, vlb) in fitresult:
+        plt.plot(vlb, ilb, label=f'L = {L}')
 
     plt.legend(loc='upper left')
+    plt.grid(True)
+    plt.axis('equal')
+    plt.xlabel(r'$V/L^\beta$')
+    plt.ylabel(r'$I/L^\alpha$')
+    plt.title(f'$D = 0$, $\\alpha = {alfa}$ e $\\beta = {beta}$')
     plt.show()
