@@ -205,7 +205,9 @@ static uint64_t seed_;
 void
 seed_rand()
 {
-  seed_ = std::time(0);
+  auto now = std::chrono::system_clock::now();
+  auto now_ns = std::chrono::time_point_cast<std::chrono::nanoseconds>(now);
+  seed_ = now_ns.time_since_epoch().count();
 }
 
 inline uint64_t
@@ -224,7 +226,7 @@ nextreal()
   return nextrand() / real(UINT64_MAX);
 }
 
-constexpr auto k_base = real{ 10 };
+constexpr auto k_base = real{ 1 };
 constexpr auto base_resistance = Ohms{ k_base };
 constexpr auto base_Imax = Amperes{ k_base };
 
@@ -452,7 +454,7 @@ generate_square_circuit(size_t L, real D)
   level++;
 
   const auto vert = 1.0;
-  const auto horiz = 0.1;
+  const auto horiz = 1.0;
 
   NodeId_t next = 1;
   std::vector<NodeId_t> prev(L, source);
@@ -847,17 +849,20 @@ main(int argc, char** argv)
   }
 
   seed_rand();
+  auto seed = seed_;
   const auto start = now();
   const auto s = simulation(L, D, G, 0, 0.1);
   const auto& last = s.xy[s.xy.size() - 2];
 
-  printf("G: %c, L: %2zu, D: %2.1f, Iter: %5zu, Time: %4ldms, Vmax: %g\n",
-         G == CircuitType::Square ? 's' : G == CircuitType::Tilted ? 't' : 'h',
-         L,
-         D,
-         s.iterations(),
-         elapsed(start),
-         last.first);
+  printf(
+    "G: %c, L: %2zu, D: %2.1f, Iter: %5zu, Time: %4ldms, Vmax: %g, Seed: %zu\n",
+    G == CircuitType::Square ? 's' : G == CircuitType::Tilted ? 't' : 'h',
+    L,
+    D,
+    s.iterations(),
+    elapsed(start),
+    last.first,
+    seed);
 
   std::ofstream out{ "output.csv" };
   s.show(out);

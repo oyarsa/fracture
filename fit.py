@@ -30,27 +30,30 @@ opt = argparse.ArgumentParser(
 
 opt.add_argument(
     '-g', '--geometry',
-    nargs='+',
     choices=['t', 'h', 's'],
-    default=['t']
+    default='t'
 )
 
 opt.add_argument(
     '-l', '--length',
-    nargs='+',
     type=int,
-    default=[14]
+    default=14
+)
+
+opt.add_argument(
+    '-c', '--count',
+    type=int,
+    default=10
 )
 
 opt.add_argument(
     '-d', '--disorder',
-    nargs='+',
     type=float,
-    default=[0, 0.2, 0.4, 0.6, 1.0]
+    default=0
 )
 
 opt.add_argument(
-    '--show',
+    '--noshow',
     action='store_true'
 )
 
@@ -81,37 +84,45 @@ exe = os.path.join('out', exename)
 plt.style.use('ggplot')
 
 args = opt.parse_args();
+G = args.geometry
+L = args.length
+D = args.disorder
 
-for G in args.geometry:
-    for L in args.length:
-        print('')
-        plt.figure()
-        plt.suptitle(f'L = {L}, G = {G}')
+print('')
+plt.figure()
+plt.suptitle(f'L = {L}, G = {G}, D = {D}')
 
-        for D in args.disorder:
-            run(f'{exe} {L} {D} {G}')
+color_map = plt.get_cmap('gist_rainbow')
 
-            if args.graph:
-                begin_path = os.path.join(pdffolder, str(D) + pdf)
-                run(f'dot {graph} -Tpdf -o{begin_path}')
-                os.remove(graph)
-                run(f'start {begin_path}', shell=True)
+for r in range(args.count):
+    run(f'{exe} {L} {D} {G}')
 
-                end_path = os.path.join(pdffolder, str(D) + pdf2)
-                run(f'dot {graphend} -Tpdf -o{end_path}')
-                os.remove(graphend)
-                run(f'start {end_path}', shell=True)
+    if args.graph:
+        begin_path = os.path.join(pdffolder, str(D) + pdf)
+        run(f'dot {graph} -Tpdf -o{begin_path}')
+        os.remove(graph)
+        run(f'start {begin_path}', shell=True)
 
-            result_path = os.path.join(datafolder, f'{L}.{G}.{D}.csv')
-            os.replace(results, result_path)
+        end_path = os.path.join(pdffolder, str(D) + pdf2)
+        run(f'dot {graphend} -Tpdf -o{end_path}')
+        os.remove(graphend)
+        run(f'start {end_path}', shell=True)
 
-            out = np.genfromtxt(result_path, delimiter=',',
-                                skip_header=1, names=['V', 'I'])
-            plt.plot(out['V'], out['I'], label=f'D={int(D*100)}%')
+    result_path = os.path.join(datafolder, f'{L}.{G}.{D}-{r}.csv')
+    os.replace(results, result_path)
 
-        plt.legend(loc='upper left')
-        if args.show:
-            plt.show()
-        fig_path = os.path.join(graphfolder, f'{G}.{L}.png')
-        plt.savefig(fig_path, bbox_inches='tight')
+    out = np.genfromtxt(result_path, delimiter=',',
+                        skip_header=1, names=['V', 'I'])
+    lines = plt.plot(out['V'], out['I'], label=f'{r}')
+    lines[0].set_color(color_map(r/args.count))
 
+plt.legend(loc='upper left')
+
+fig_path = os.path.join(graphfolder, f'{G}.{L}.png')
+plt.savefig(fig_path, bbox_inches='tight')
+
+fig_path2 = os.path.join(datafolder, f'{G}.{L}.{D}.png')
+plt.savefig(fig_path2, bbox_inches='tight')
+
+if not args.noshow:
+    plt.show()
