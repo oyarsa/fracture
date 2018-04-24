@@ -33,16 +33,6 @@ def convert_geometry(initial):
   }[initial]
 
 
-def fit(data, eta, nu, D):
-    V = data['V']
-    I = data['I']
-
-    vlb = V * (1 + D)**nu
-    ilb = I * (1 + D)**eta
-
-    return ilb, vlb
-
-
 def sort_files(path):
     filename = os.path.basename(path)
     disorder = filename.split('.')[2]
@@ -56,28 +46,20 @@ disorders = [0, 0.2, 0.4, 0.6, 0.8, 1.0]
 data = [np.genfromtxt(path, delimiter=',', skip_header=1, names=['V', 'I'])
         for path in files]
 
-while True:
-    try:
-        eta = float(input('\neta: '))
-        nu = float(input('nu: '))
-    except ValueError:
-        break
-    fitresult = [(D, fit(d, eta, nu, D)) for D, d in zip(disorders, data)]
+for D, d in zip(disorders, data):
+    plt.plot(d['V'], d['I'], label=f'D = {D}')
 
-    for D, (ilb, vlb) in fitresult:
-        plt.plot(vlb, ilb, label=f'D = {D}')
+plt.legend(loc='upper left')
+plt.grid(True)
+plt.axis('equal')
 
-    plt.legend(loc='upper left')
-    plt.grid(True)
-    #plt.axis('equal')
+plt.xlabel(r'$V$')
+plt.ylabel(r'$I$')
 
-    plt.xlabel(r'$V(1+D)^{\nu}$')
-    plt.ylabel(r'$I(1+D)^{\eta}$')
+#plt.gca().set_adjustable("box")
+#plt.gca().set_ylim(bottom=0.0)
 
-    #plt.gca().set_adjustable("box")
-    #plt.gca().set_ylim(bottom=0.0)
-
-    length = args.length
-    geometry = convert_geometry(args.geometry)
-    plt.title(f'$L = {length}$, G = {geometry}, $\\eta = {eta}$ e $\\nu = {nu}$')
-    plt.show()
+length = args.length
+geometry = convert_geometry(args.geometry)
+plt.title(f'$L = {length}$, G = {geometry}')
+plt.show()
