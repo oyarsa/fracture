@@ -11,7 +11,7 @@ ifeq ($(BUILD),release)
     CXXFLAGS ?= -O2 -DNDEBUG -DEIGEN_NO_DEBUG
     CXXFLAGS += $(COMMON_FLAGS) $(HARDENING_FLAGS)
 else ifeq ($(BUILD),dev)
-    CXXFLAGS ?= -O0 -g
+    CXXFLAGS ?= -O1 -g
     CXXFLAGS += $(COMMON_FLAGS) $(HARDENING_FLAGS)
     CXXFLAGS += -fsanitize=address,undefined -fno-omit-frame-pointer
     LDFLAGS  += -fsanitize=address,undefined
