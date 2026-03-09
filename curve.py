@@ -7,9 +7,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 GEOMETRY_NAMES: dict[str, str] = {
-    "t": "45 graus",
+    "t": "45 degrees",
     "h": "hexagonal",
-    "s": "quadrada",
+    "s": "square",
 }
 
 

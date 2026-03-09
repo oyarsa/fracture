@@ -8,9 +8,9 @@ import numpy as np
 import numpy.typing as npt
 
 GEOMETRY_NAMES: dict[str, str] = {
-    "t": "45 graus",
+    "t": "45 degrees",
     "h": "hexagonal",
-    "s": "quadrada",
+    "s": "square",
 }
 
 
@@ -95,7 +95,7 @@ def main() -> None:
             plt.axis("equal")
             plt.xlabel(r"$V/L^\beta$")
             plt.ylabel(r"$I/L^\alpha$")
-            plt.title(f"$D = 0$, $\\alpha = {alfa}$ e $\\beta = {beta}$")
+            plt.title(f"$D = 0$, $\\alpha = {alfa}$ and $\\beta = {beta}$")
             plt.show()
 
     else:
@@ -127,7 +127,7 @@ def main() -> None:
 
             geometry = GEOMETRY_NAMES[args.geometry]
             plt.title(
-                f"$L = {args.length}$, G = {geometry}, $\\eta = {eta}$ e $\\nu = {nu}$"
+                f"$L = {args.length}$, G = {geometry}, $\\eta = {eta}$ and $\\nu = {nu}$"
             )
             plt.show()
 
