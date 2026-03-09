@@ -30,8 +30,6 @@
 #include <utility>
 #include <vector>
 
-#define EIGEN_USE_MKL_ALL
-#define EIGEN_NO_DEBUG
 #include <Eigen/Dense>
 
 using std::size_t;
