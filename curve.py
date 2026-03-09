@@ -28,15 +28,24 @@ def parse_args() -> argparse.Namespace:
     )
     opt.add_argument("-s", "--source", type=Path, required=True)
     opt.add_argument(
-        "-m", "--mode", choices=["size", "disorder"], required=True,
+        "-m",
+        "--mode",
+        choices=["size", "disorder"],
+        required=True,
         help="Vary over lattice size or disorder",
     )
     opt.add_argument("-g", "--geometry", choices=["t", "h", "s"])
     opt.add_argument(
-        "-d", "--disorder", type=float, help="Fixed disorder value (required for mode=size)"
+        "-d",
+        "--disorder",
+        type=float,
+        help="Fixed disorder value (required for mode=size)",
     )
     opt.add_argument(
-        "-l", "--length", type=int, help="Fixed length value (required for mode=disorder)"
+        "-l",
+        "--length",
+        type=int,
+        help="Fixed length value (required for mode=disorder)",
     )
     return opt.parse_args()
 

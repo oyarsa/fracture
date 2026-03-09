@@ -45,15 +45,22 @@ def parse_args() -> argparse.Namespace:
     )
     opt.add_argument("-s", "--source", type=Path, required=True)
     opt.add_argument(
-        "-m", "--mode", choices=["size", "disorder"], required=True,
+        "-m",
+        "--mode",
+        choices=["size", "disorder"],
+        required=True,
         help="Vary over lattice size or disorder",
     )
     opt.add_argument(
-        "-g", "--geometry", choices=["t", "h", "s"],
+        "-g",
+        "--geometry",
+        choices=["t", "h", "s"],
         help="Geometry type (required for mode=disorder)",
     )
     opt.add_argument(
-        "-l", "--length", type=int,
+        "-l",
+        "--length",
+        type=int,
         help="Fixed length value (required for mode=disorder)",
     )
     return opt.parse_args()
@@ -78,9 +85,7 @@ def main() -> None:
                 beta = float(input("beta: "))
             except ValueError:
                 break
-            fitresult = [
-                (L, fit_size(d, alfa, beta, L)) for L, d in zip(sizes, data)
-            ]
+            fitresult = [(L, fit_size(d, alfa, beta, L)) for L, d in zip(sizes, data)]
 
             for L, (ilb, vlb) in fitresult:
                 plt.plot(vlb, ilb, label=f"L = {L}")
@@ -109,8 +114,7 @@ def main() -> None:
             except ValueError:
                 break
             fitresult = [
-                (D, fit_disorder(d, eta, nu, D))
-                for D, d in zip(disorders, data)
+                (D, fit_disorder(d, eta, nu, D)) for D, d in zip(disorders, data)
             ]
 
             for D, (ilb, vlb) in fitresult:
