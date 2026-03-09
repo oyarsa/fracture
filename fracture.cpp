@@ -86,7 +86,7 @@ struct Circuit
   std::vector<std::vector<std::shared_ptr<Edge>>> adjacencies;
   std::vector<std::vector<std::shared_ptr<Edge>>> inputs;
   Matrix admittance_matrix;
-  Matrix coefKCL;
+  Matrix coef_kcl;
 
   Circuit(size_t n)
     : nodes(n)
@@ -94,7 +94,7 @@ struct Circuit
     , adjacencies(n)
     , inputs(n)
     , admittance_matrix(Matrix::Zero(n, n))
-    , coefKCL()
+    , coef_kcl()
   {
   }
 
@@ -108,16 +108,11 @@ struct Circuit
 
   void add_node(NodeId_t node, size_t level)
   {
-    add_node_to_level(node, level);
-    nodes[node] = node;
-  }
-
-  void add_node_to_level(NodeId_t node, size_t level)
-  {
     while (levels.size() <= level) {
       levels.push_back({});
     }
     levels[level].push_back(node);
+    nodes[node] = node;
   }
 
   void add_edge(const Edge& edge)
@@ -140,25 +135,25 @@ struct Circuit
     auto u = pseudo_node(src);
     auto v = pseudo_node(dst);
 
-    auto u_in_M = u >= 0 && u < effective_node_count();
-    auto v_in_M = v >= 0 && v < effective_node_count();
+    auto u_in_M = u >= 0 && static_cast<size_t>(u) < effective_node_count();
+    auto v_in_M = v >= 0 && static_cast<size_t>(v) < effective_node_count();
 
     if (u_in_M && v_in_M) {
-      coefKCL(u, v) = 0;
-      coefKCL(v, u) = 0;
+      coef_kcl(u, v) = 0;
+      coef_kcl(v, u) = 0;
     }
 
     if (u_in_M) {
-      coefKCL(u, u) -= G;
-      if (almost_equal(coefKCL(u, u), 0.0)) {
-        coefKCL(u, u) = 0;
+      coef_kcl(u, u) -= G;
+      if (almost_equal(coef_kcl(u, u), 0.0)) {
+        coef_kcl(u, u) = 0;
       }
     }
 
     if (v_in_M) {
-      coefKCL(v, v) -= G;
-      if (almost_equal(coefKCL(v, v), 0.0)) {
-        coefKCL(v, v) = 0;
+      coef_kcl(v, v) -= G;
+      if (almost_equal(coef_kcl(v, v), 0.0)) {
+        coef_kcl(v, v) = 0;
       }
     }
   }
@@ -259,7 +254,7 @@ generate_tilted_circuit(size_t L, real D)
   NodeId_t next = 1;
   std::vector<NodeId_t> prev(L + 1, source);
   std::vector<NodeId_t> curr(L + 1);
-  auto last_count = 1;
+  size_t last_count = 1;
 
   for (auto i = 0u; i < L; i++) {
     // Phase 1
@@ -351,7 +346,7 @@ generate_hexagon_circuit(size_t L, real D)
   std::vector<NodeId_t> prev(L + 1, source);
   std::vector<NodeId_t> curr(L + 1);
 
-  auto last_count = 1;
+  size_t last_count = 1;
 
   for (auto i = 0u; i < L; i++) {
     // Phase 1
@@ -573,7 +568,7 @@ calculate_current(Circuit& g, real V)
 }
 
 void
-remove_burned(Circuit& g, real V)
+remove_burned(Circuit& g)
 {
   for (const auto p : g.nodes) {
     auto& adj = g.adjacencies[p];
@@ -696,8 +691,8 @@ init_kcl(Circuit& g)
   const auto fst = g.actual_node(0);
 
   //------ Building coefficient matrix
-  g.coefKCL = -(M + M.transpose()).block(fst, fst, m, m);
-  g.coefKCL.diagonal() =
+  g.coef_kcl = -(M + M.transpose()).block(fst, fst, m, m);
+  g.coef_kcl.diagonal() =
     (M.rowwise().sum() + M.colwise().sum().transpose()).segment(fst, m);
 }
 
@@ -709,7 +704,7 @@ calculate_current_kcl(Circuit& g, real Vtotal)
   const auto fst = g.actual_node(0);
 
   // Coefficient matrix
-  const auto& coefKCL = g.coefKCL;
+  const auto& coef_kcl = g.coef_kcl;
 
   //------ Building independent term
   Vector currentsKCL =
@@ -717,19 +712,19 @@ calculate_current_kcl(Circuit& g, real Vtotal)
 
   //------ Removing zeroed rows and columns from coef matrix
   const Eigen::Matrix<bool, 1, Eigen::Dynamic> non_zero_cols =
-    coefKCL.cast<bool>().colwise().any();
+    coef_kcl.cast<bool>().colwise().any();
 
   Matrix A(non_zero_cols.count(), non_zero_cols.count());
   std::vector<size_t> keep;
-  keep.reserve(coefKCL.rows());
+  keep.reserve(coef_kcl.rows());
 
-  for (Eigen::Index u = 0, j = 0; u < coefKCL.cols(); u++) {
+  for (Eigen::Index u = 0, j = 0; u < coef_kcl.cols(); u++) {
     if (!non_zero_cols(u))
       continue;
 
-    for (Eigen::Index v = 0, i = 0; v < coefKCL.rows(); v++) {
+    for (Eigen::Index v = 0, i = 0; v < coef_kcl.rows(); v++) {
       if (non_zero_cols(v)) {
-        A(i, j) = coefKCL(v, u);
+        A(i, j) = coef_kcl(v, u);
         i++;
       }
     }
@@ -799,7 +794,7 @@ simulation(size_t L, real D, CircuitType G, real V0, real deltaV)
     auto I = calculate_current_kcl(g, V);
     l.log(V, I);
 
-    remove_burned(g, V);
+    remove_burned(g);
     V += deltaV;
   }
   l.log(V, 0);
