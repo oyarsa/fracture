@@ -21,7 +21,7 @@ endif
 OUT_DIR := out
 TARGET  := $(OUT_DIR)/fracture
 
-.PHONY: all clean
+.PHONY: all clean lint-python
 
 all: $(TARGET)
 
@@ -35,3 +35,8 @@ clean:
 	rm -rf $(OUT_DIR)
 	rm -f graph*.dot* *.csv
 	rm -rf data graphs pdf results
+
+lint-python:
+	uv run ruff format
+	uv run ruff check
+	uv run pyrefly check
