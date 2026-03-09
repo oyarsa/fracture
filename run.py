@@ -16,99 +16,88 @@
   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
+from __future__ import annotations
+
 import argparse
-import matplotlib.pyplot as plt
-import numpy as np
-import os
 import subprocess
 import sys
+from pathlib import Path
 
-opt = argparse.ArgumentParser(
-    description='Execute fracture simulations.',
-    formatter_class=argparse.ArgumentDefaultsHelpFormatter
-)
+import matplotlib.pyplot as plt
+import numpy as np
 
-opt.add_argument(
-    '-g', '--geometry',
-    nargs='+',
-    choices=['t', 'h', 's'],
-    default=['t']
-)
+EXE = Path("out/fracture")
+DATA_DIR = Path("data")
+PDF_DIR = Path("pdf")
+GRAPH_DIR = Path("graphs")
+RESULTS_FILE = Path("output.csv")
+GRAPH_BEGIN = Path("graph-begin.dot")
+GRAPH_END = Path("graph-end.dot")
+OPENER = "open" if sys.platform == "darwin" else "xdg-open"
 
-opt.add_argument(
-    '-l', '--length',
-    nargs='+',
-    type=int,
-    default=[14]
-)
 
-opt.add_argument(
-    '-d', '--disorder',
-    nargs='+',
-    type=float,
-    default=[0, 0.2, 0.4, 0.6, 1.0]
-)
+def open_file(path: Path) -> None:
+    subprocess.run([OPENER, str(path)])
 
-opt.add_argument(
-    '--show',
-    action='store_true'
-)
 
-opt.add_argument(
-    '--graph',
-    action='store_true'
-)
+def render_graph(dot_file: Path, pdf_path: Path) -> None:
+    subprocess.run(["dot", str(dot_file), "-Tpdf", f"-o{pdf_path}"])
+    dot_file.unlink()
+    open_file(pdf_path)
 
-datafolder = 'data'
-pdffolder = 'pdf'
-graphfolder = 'graphs'
-results = 'output.csv'
-pdf = 'output.pdf'
-pdf2 = 'result.pdf'
-graph = 'graph-begin.dot'
-graphend = 'graph-end.dot'
 
-os.makedirs(datafolder, exist_ok=True)
-os.makedirs(pdffolder, exist_ok=True)
-os.makedirs(graphfolder, exist_ok=True)
+def parse_args() -> argparse.Namespace:
+    opt = argparse.ArgumentParser(
+        description="Execute fracture simulations.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    opt.add_argument(
+        "-g", "--geometry", nargs="+", choices=["t", "h", "s"], default=["t"]
+    )
+    opt.add_argument("-l", "--length", nargs="+", type=int, default=[14])
+    opt.add_argument(
+        "-d", "--disorder", nargs="+", type=float, default=[0, 0.2, 0.4, 0.6, 1.0]
+    )
+    opt.add_argument("--show", action="store_true")
+    opt.add_argument("--graph", action="store_true")
+    return opt.parse_args()
 
-exe = os.path.join('out', 'fracture')
-opener = 'open' if sys.platform == 'darwin' else 'xdg-open'
 
-plt.style.use('ggplot')
+def main() -> None:
+    args = parse_args()
 
-args = opt.parse_args();
+    DATA_DIR.mkdir(exist_ok=True)
+    PDF_DIR.mkdir(exist_ok=True)
+    GRAPH_DIR.mkdir(exist_ok=True)
 
-for G in args.geometry:
-    for L in args.length:
-        print('')
-        plt.figure()
-        plt.suptitle(f'L = {L}, G = {G}')
+    plt.style.use("ggplot")
 
-        for D in args.disorder:
-            subprocess.run(f'{exe} {L} {D} {G}')
+    for G in args.geometry:
+        for L in args.length:
+            print()
+            plt.figure()
+            plt.suptitle(f"L = {L}, G = {G}")
 
-            if args.graph:
-                begin_path = os.path.join(pdffolder, str(D) + pdf)
-                subprocess.run(f'dot {graph} -Tpdf -o{begin_path}')
-                os.remove(graph)
-                subprocess.run([opener, begin_path])
+            for D in args.disorder:
+                subprocess.run([str(EXE), str(L), str(D), G])
 
-                end_path = os.path.join(pdffolder, str(D) + pdf2)
-                subprocess.run(f'dot {graphend} -Tpdf -o{end_path}')
-                os.remove(graphend)
-                subprocess.run([opener, end_path])
+                if args.graph:
+                    render_graph(GRAPH_BEGIN, PDF_DIR / f"{D}output.pdf")
+                    render_graph(GRAPH_END, PDF_DIR / f"{D}result.pdf")
 
-            result_path = os.path.join(datafolder, f'{L}.{G}.{D}.csv')
-            os.replace(results, result_path)
+                result_path = DATA_DIR / f"{L}.{G}.{D}.csv"
+                RESULTS_FILE.replace(result_path)
 
-            out = np.genfromtxt(result_path, delimiter=',',
-                                skip_header=1, names=['V', 'I'])
-            plt.plot(out['V'], out['I'], label=f'D={int(D*100)}%')
+                out = np.genfromtxt(
+                    result_path, delimiter=",", skip_header=1, names=["V", "I"]
+                )
+                plt.plot(out["V"], out["I"], label=f"D={int(D * 100)}%")
 
-        plt.legend(loc='upper left')
-        if args.show:
-            plt.show()
-        fig_path = os.path.join(graphfolder, f'{G}.{L}.png')
-        plt.savefig(fig_path, bbox_inches='tight')
+            plt.legend(loc="upper left")
+            if args.show:
+                plt.show()
+            plt.savefig(GRAPH_DIR / f"{G}.{L}.png", bbox_inches="tight")
 
+
+if __name__ == "__main__":
+    main()

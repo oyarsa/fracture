@@ -16,60 +16,48 @@
   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
+from __future__ import annotations
+
 import argparse
-import matplotlib.pyplot as plt
-import numpy as np
-import os
-import sys
 from pathlib import Path
 
-opt = argparse.ArgumentParser(
-    description='Plot folder.',
-    formatter_class=argparse.ArgumentDefaultsHelpFormatter
-)
+import matplotlib.pyplot as plt
+import numpy as np
 
-opt.add_argument(
-    '-f', '--folder',
-    required=True
-)
 
-opt.add_argument(
-    '--noshow',
-    action='store_true'
-)
+def parse_args() -> argparse.Namespace:
+    opt = argparse.ArgumentParser(
+        description="Plot folder.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    opt.add_argument("-f", "--folder", type=Path, required=True)
+    opt.add_argument("--noshow", action="store_true")
+    opt.add_argument("-g", "--geometry", choices=["t", "h", "s"], required=True)
+    opt.add_argument("-l", "--length", type=int, required=True)
+    return opt.parse_args()
 
-opt.add_argument(
-    '-g', '--geometry',
-    choices=['t', 'h', 's'],
-    required=True
-)
 
-opt.add_argument(
-    '-l', '--length',
-    type=int,
-    required=True
-)
+def main() -> None:
+    args = parse_args()
+    folder: Path = args.folder
 
-plt.style.use('ggplot')
+    plt.style.use("ggplot")
 
-args = opt.parse_args();
+    print()
+    plt.figure()
+    plt.suptitle(f"L = {args.length}, G = {args.geometry}")
 
-print('')
-plt.figure()
-plt.suptitle(f'L = {args.length}, G = {args.geometry}')
+    for path in sorted(folder.glob("*.csv")):
+        out = np.genfromtxt(path, delimiter=",", skip_header=1, names=["V", "I"])
+        D = ".".join(path.stem.split(".")[2:])
+        plt.plot(out["V"], out["I"], label=f"D = {D}")
 
-pathlist = Path(args.folder).glob('*.csv')
+    plt.legend(loc="upper left")
+    plt.savefig(folder, bbox_inches="tight")
 
-for path in pathlist:
-    out = np.genfromtxt(str(path), delimiter=',',
-                        skip_header=1, names=['V', 'I'])
-    parts = path.stem.split('.')
-    D = '.'.join(parts[2:])
-    lines = plt.plot(out['V'], out['I'], label=f'D = {D}')
+    if not args.noshow:
+        plt.show()
 
-plt.legend(loc='upper left')
 
-plt.savefig(args.folder, bbox_inches='tight')
-
-if not args.noshow:
-    plt.show()
+if __name__ == "__main__":
+    main()

@@ -1,131 +1,132 @@
+from __future__ import annotations
+
 import argparse
-import os
-import glob
-import numpy as np
+from pathlib import Path
+
 import matplotlib.pyplot as plt
+import numpy as np
+import numpy.typing as npt
 
-opt = argparse.ArgumentParser(
-    description='Evaluate fracture power law.',
-    formatter_class=argparse.ArgumentDefaultsHelpFormatter
-)
-
-opt.add_argument(
-    '-s', '--source',
-    type=str,
-    required=True
-)
-
-opt.add_argument(
-    '-m', '--mode',
-    type=str,
-    choices=['size', 'disorder'],
-    required=True,
-    help='Vary over lattice size or disorder'
-)
-
-opt.add_argument(
-    '-g', '--geometry',
-    type=str,
-    choices=['t', 'h', 's'],
-    help='Geometry type (required for mode=disorder)'
-)
-
-opt.add_argument(
-    '-l', '--length',
-    type=int,
-    help='Fixed length value (required for mode=disorder)'
-)
+GEOMETRY_NAMES: dict[str, str] = {
+    "t": "45 graus",
+    "h": "hexagonal",
+    "s": "quadrada",
+}
 
 
-def convert_geometry(initial):
-    return {
-        't': '45 graus',
-        'h': 'hexagonal',
-        's': 'quadrada'
-    }[initial]
-
-
-def fit_size(data, alfa, beta, L):
-    V = data['V']
-    I = data['I']
-    vlb = V / (L**beta)
-    ilb = I / (L**alfa)
+def fit_size(
+    data: npt.NDArray, alfa: float, beta: float, L: int
+) -> tuple[npt.NDArray, npt.NDArray]:
+    vlb = data["V"] / (L**beta)
+    ilb = data["I"] / (L**alfa)
     return ilb, vlb
 
 
-def fit_disorder(data, eta, nu, D):
-    V = data['V']
-    I = data['I']
-    vlb = V * (1 + D)**nu
-    ilb = I * (1 + D)**eta
+def fit_disorder(
+    data: npt.NDArray, eta: float, nu: float, D: float
+) -> tuple[npt.NDArray, npt.NDArray]:
+    vlb = data["V"] * (1 + D) ** nu
+    ilb = data["I"] * (1 + D) ** eta
     return ilb, vlb
 
 
-def sort_by_size(path):
-    filename = os.path.basename(path)
-    length = filename.split('.')[0]
-    return int(length)
+def sort_by_size(path: Path) -> int:
+    return int(path.stem.split(".")[0])
 
 
-def sort_by_disorder(path):
-    filename = os.path.basename(path)
-    disorder = filename.split('.')[2]
-    disorder = disorder.replace(',', '.')
-    return float(disorder)
+def sort_by_disorder(path: Path) -> float:
+    return float(path.stem.split(".")[2].replace(",", "."))
 
 
-args = opt.parse_args()
+def parse_args() -> argparse.Namespace:
+    opt = argparse.ArgumentParser(
+        description="Evaluate fracture power law.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    opt.add_argument("-s", "--source", type=Path, required=True)
+    opt.add_argument(
+        "-m", "--mode", choices=["size", "disorder"], required=True,
+        help="Vary over lattice size or disorder",
+    )
+    opt.add_argument(
+        "-g", "--geometry", choices=["t", "h", "s"],
+        help="Geometry type (required for mode=disorder)",
+    )
+    opt.add_argument(
+        "-l", "--length", type=int,
+        help="Fixed length value (required for mode=disorder)",
+    )
+    return opt.parse_args()
 
-if args.mode == 'size':
-    files = sorted(glob.glob(args.source + "/*.csv"), key=sort_by_size)
-    print('\n'.join(files))
-    sizes = [7, 14, 20, 28]
-    data = [np.genfromtxt(path, delimiter=',', skip_header=1, names=['V', 'I'])
-            for path in files]
 
-    while True:
-        try:
-            alfa = float(input('\nalfa: '))
-            beta = float(input('beta: '))
-        except ValueError:
-            break
-        fitresult = [(L, fit_size(d, alfa, beta, L)) for L, d in zip(sizes, data)]
+def main() -> None:
+    args = parse_args()
+    source: Path = args.source
 
-        for L, (ilb, vlb) in fitresult:
-            plt.plot(vlb, ilb, label=f'L = {L}')
+    if args.mode == "size":
+        files = sorted(source.glob("*.csv"), key=sort_by_size)
+        print("\n".join(str(f) for f in files))
+        sizes = [7, 14, 20, 28]
+        data = [
+            np.genfromtxt(path, delimiter=",", skip_header=1, names=["V", "I"])
+            for path in files
+        ]
 
-        plt.legend(loc='upper left')
-        plt.grid(True)
-        plt.axis('equal')
-        plt.xlabel(r'$V/L^\beta$')
-        plt.ylabel(r'$I/L^\alpha$')
-        plt.title(f'$D = 0$, $\\alpha = {alfa}$ e $\\beta = {beta}$')
-        plt.show()
+        while True:
+            try:
+                alfa = float(input("\nalfa: "))
+                beta = float(input("beta: "))
+            except ValueError:
+                break
+            fitresult = [
+                (L, fit_size(d, alfa, beta, L)) for L, d in zip(sizes, data)
+            ]
 
-else:
-    files = sorted(glob.glob(args.source + "/*.csv"), key=sort_by_disorder)
-    print('\n'.join(files))
-    disorders = [0, 0.2, 0.4, 0.6, 0.8, 1.0]
-    data = [np.genfromtxt(path, delimiter=',', skip_header=1, names=['V', 'I'])
-            for path in files]
+            for L, (ilb, vlb) in fitresult:
+                plt.plot(vlb, ilb, label=f"L = {L}")
 
-    while True:
-        try:
-            eta = float(input('\neta: '))
-            nu = float(input('nu: '))
-        except ValueError:
-            break
-        fitresult = [(D, fit_disorder(d, eta, nu, D)) for D, d in zip(disorders, data)]
+            plt.legend(loc="upper left")
+            plt.grid(True)
+            plt.axis("equal")
+            plt.xlabel(r"$V/L^\beta$")
+            plt.ylabel(r"$I/L^\alpha$")
+            plt.title(f"$D = 0$, $\\alpha = {alfa}$ e $\\beta = {beta}$")
+            plt.show()
 
-        for D, (ilb, vlb) in fitresult:
-            plt.plot(vlb, ilb, label=f'D = {D}')
+    else:
+        files = sorted(source.glob("*.csv"), key=sort_by_disorder)
+        print("\n".join(str(f) for f in files))
+        disorders = [0, 0.2, 0.4, 0.6, 0.8, 1.0]
+        data = [
+            np.genfromtxt(path, delimiter=",", skip_header=1, names=["V", "I"])
+            for path in files
+        ]
 
-        plt.legend(loc='upper left')
-        plt.grid(True)
-        plt.xlabel(r'$V(1+D)^{\nu}$')
-        plt.ylabel(r'$I(1+D)^{\eta}$')
+        while True:
+            try:
+                eta = float(input("\neta: "))
+                nu = float(input("nu: "))
+            except ValueError:
+                break
+            fitresult = [
+                (D, fit_disorder(d, eta, nu, D))
+                for D, d in zip(disorders, data)
+            ]
 
-        length = args.length
-        geometry = convert_geometry(args.geometry)
-        plt.title(f'$L = {length}$, G = {geometry}, $\\eta = {eta}$ e $\\nu = {nu}$')
-        plt.show()
+            for D, (ilb, vlb) in fitresult:
+                plt.plot(vlb, ilb, label=f"D = {D}")
+
+            plt.legend(loc="upper left")
+            plt.grid(True)
+            plt.xlabel(r"$V(1+D)^{\nu}$")
+            plt.ylabel(r"$I(1+D)^{\eta}$")
+
+            geometry = GEOMETRY_NAMES[args.geometry]
+            plt.title(
+                f"$L = {args.length}$, G = {geometry}, $\\eta = {eta}$ e $\\nu = {nu}$"
+            )
+            plt.show()
+
+
+if __name__ == "__main__":
+    main()
