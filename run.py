@@ -20,8 +20,8 @@ import argparse
 import matplotlib.pyplot as plt
 import numpy as np
 import os
+import subprocess
 import sys
-from subprocess import run, DEVNULL
 
 opt = argparse.ArgumentParser(
     description='Execute fracture simulations.',
@@ -72,11 +72,8 @@ os.makedirs(datafolder, exist_ok=True)
 os.makedirs(pdffolder, exist_ok=True)
 os.makedirs(graphfolder, exist_ok=True)
 
-exename = 'fracture'
-if sys.platform == 'win32':
-    exename += '.exe'
-
-exe = os.path.join('out', exename)
+exe = os.path.join('out', 'fracture')
+opener = 'open' if sys.platform == 'darwin' else 'xdg-open'
 
 plt.style.use('ggplot')
 
@@ -89,18 +86,18 @@ for G in args.geometry:
         plt.suptitle(f'L = {L}, G = {G}')
 
         for D in args.disorder:
-            run(f'{exe} {L} {D} {G}')
+            subprocess.run(f'{exe} {L} {D} {G}')
 
             if args.graph:
                 begin_path = os.path.join(pdffolder, str(D) + pdf)
-                run(f'dot {graph} -Tpdf -o{begin_path}')
+                subprocess.run(f'dot {graph} -Tpdf -o{begin_path}')
                 os.remove(graph)
-                run(f'start {begin_path}', shell=True)
+                subprocess.run([opener, begin_path])
 
                 end_path = os.path.join(pdffolder, str(D) + pdf2)
-                run(f'dot {graphend} -Tpdf -o{end_path}')
+                subprocess.run(f'dot {graphend} -Tpdf -o{end_path}')
                 os.remove(graphend)
-                run(f'start {end_path}', shell=True)
+                subprocess.run([opener, end_path])
 
             result_path = os.path.join(datafolder, f'{L}.{G}.{D}.csv')
             os.replace(results, result_path)
